@@ -302,3 +302,13 @@ func equalInt64s(a, b []int64) bool {
 	}
 	return true
 }
+
+func TestNewShardedWithCountPanics(t *testing.T) {
+	t.Parallel()
+	defer func() {
+		if recover() == nil {
+			t.Fatal("expected panic for non-positive shard count")
+		}
+	}()
+	_ = NewShardedWithCount([]int64{1}, 0)
+}

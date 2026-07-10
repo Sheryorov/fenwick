@@ -285,3 +285,24 @@ func TestNilTreeOperations(t *testing.T) {
 		t.Fatalf("Nil tree At(0): error %v, want ErrIndexOutOfRange", err)
 	}
 }
+
+func TestFloat64AndNamedType(t *testing.T) {
+	t.Parallel()
+
+	ft := New([]float64{1.5, 2.25, -0.75})
+	if got := ft.Total(); got != 3.0 {
+		t.Fatalf("float Total()=%v, want 3", got)
+	}
+	if err := ft.Set(1, 1.25); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := ft.RangeSum(0, 2); err != nil || got != 2.0 {
+		t.Fatalf("float RangeSum()=(%v,%v), want (2,nil)", got, err)
+	}
+
+	type Score int64
+	named := New([]Score{1, 2, 3})
+	if got := named.Total(); got != 6 {
+		t.Fatalf("named Total()=%v, want 6", got)
+	}
+}

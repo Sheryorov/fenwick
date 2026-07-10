@@ -5,14 +5,17 @@
 [![codecov](https://codecov.io/gh/Sheryorov/fenwick/graph/badge.svg)](https://codecov.io/gh/Sheryorov/fenwick)
 [![Go Report Card](https://goreportcard.com/badge/github.com/Sheryorov/fenwick)](https://goreportcard.com/report/github.com/Sheryorov/fenwick)
 
-A zero-based, concurrency-safe Fenwick tree for generic numeric types supporting point updates and range sums.
+A zero-based, concurrency-safe Fenwick tree for signed integer and floating-point types, supporting point updates and range sums.
 
 ## Supported Types
 
-The `Tree[T]` and `ShardedTree[T]` types work with:
-- Signed integers: `int`, `int8`, `int16`, `int32`, `int64`
-- Unsigned integers: `uint`, `uint8`, `uint16`, `uint32`, `uint64`
-- Floating point: `float32`, `float64`
+The `Tree[T]` and `ShardedTree[T]` types support:
+- signed integers: `int`, `int8`, `int16`, `int32`, `int64`;
+- floating point: `float32`, `float64`;
+- named types whose underlying type is one of the above.
+
+Unsigned integers are intentionally excluded because `Set` may need a negative
+delta when a value decreases. Arithmetic overflow is not detected.
 
 ## API
 
