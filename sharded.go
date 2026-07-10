@@ -142,6 +142,68 @@ func (t *ShardedTree[T]) Add(index int, delta T) error {
 	s.total = t.ops.Add(s.total, delta)
 	return nil
 }
+
+// Apply atomically applies a batch of point mutations in slice order.
+//
+// All mutations are validated before locks are acquired. Every touched shard
+// is then write-locked in ascending order, preventing deadlocks and ensuring
+// exact readers observe either the state before the whole batch or the state
+// after it. Fast cross-shard readers retain their documented non-snapshot
+// semantics. An empty batch is a no-op.
+func (t *ShardedTree[T]) Apply(mutations ...Mutation[T]) error {
+	if len(mutations) == 0 {
+		return nil
+	}
+	if t == nil {
+		return indexError(mutations[0].Index, 0)
+	}
+
+	touched := make([]bool, len(t.shards))
+	for _, mutation := range mutations {
+		si, _, err := t.locate(mutation.Index)
+		if err != nil {
+			return err
+		}
+		if err := validateMutationKind(mutation.Kind); err != nil {
+			return err
+		}
+		touched[si] = true
+	}
+
+	for i, isTouched := range touched {
+		if isTouched {
+			t.shards[i].mu.Lock()
+		}
+	}
+	defer func() {
+		for i := len(touched) - 1; i >= 0; i-- {
+			if touched[i] {
+				t.shards[i].mu.Unlock()
+			}
+		}
+	}()
+
+	for _, mutation := range mutations {
+		si := mutation.Index / t.shardSize
+		li := mutation.Index - si*t.shardSize
+		s := &t.shards[si]
+
+		switch mutation.Kind {
+		case MutationAdd:
+			s.vals[li] = t.ops.Add(s.vals[li], mutation.Value)
+			s.addLocked(t.ops, li+1, mutation.Value)
+			s.total = t.ops.Add(s.total, mutation.Value)
+		case MutationSet:
+			delta := t.ops.Sub(mutation.Value, s.vals[li])
+			s.vals[li] = mutation.Value
+			s.addLocked(t.ops, li+1, delta)
+			s.total = t.ops.Add(s.total, delta)
+		}
+	}
+
+	return nil
+}
+
 func (t *ShardedTree[T]) Set(index int, value T) error {
 	si, li, err := t.locate(index)
 	if err != nil {

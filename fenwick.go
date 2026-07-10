@@ -99,6 +99,46 @@ func (t *Tree[T]) Add(index int, delta T) error {
 	return nil
 }
 
+// Apply atomically applies a batch of point mutations in slice order.
+//
+// All mutations are validated before any value is changed. The tree lock is
+// acquired once, so readers and writers observe either the state before the
+// whole batch or the state after it. An empty batch is a no-op.
+func (t *Tree[T]) Apply(mutations ...Mutation[T]) error {
+	if len(mutations) == 0 {
+		return nil
+	}
+	if t == nil {
+		return indexError(mutations[0].Index, 0)
+	}
+
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	for _, mutation := range mutations {
+		if err := validateIndex(mutation.Index, len(t.vals)); err != nil {
+			return err
+		}
+		if err := validateMutationKind(mutation.Kind); err != nil {
+			return err
+		}
+	}
+
+	for _, mutation := range mutations {
+		switch mutation.Kind {
+		case MutationAdd:
+			t.vals[mutation.Index] = t.ops.Add(t.vals[mutation.Index], mutation.Value)
+			t.addLocked(mutation.Index+1, mutation.Value)
+		case MutationSet:
+			delta := t.ops.Sub(mutation.Value, t.vals[mutation.Index])
+			t.vals[mutation.Index] = mutation.Value
+			t.addLocked(mutation.Index+1, delta)
+		}
+	}
+
+	return nil
+}
+
 func (t *Tree[T]) Set(index int, value T) error {
 	if t == nil {
 		return indexError(index, 0)

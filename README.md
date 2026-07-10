@@ -1,3 +1,4 @@
+# Fenwick Tree for Go
 [![Build](https://github.com/Sheryorov/fenwick/actions/workflows/build.yml/badge.svg?branch=master)](https://github.com/Sheryorov/fenwick/actions/workflows/build.yml)
 [![Tests](https://github.com/Sheryorov/fenwick/actions/workflows/tests.yml/badge.svg?branch=master)](https://github.com/Sheryorov/fenwick/actions/workflows/tests.yml)
 [![codecov](https://codecov.io/gh/Sheryorov/fenwick/branch/master/graph/badge.svg)](https://codecov.io/gh/Sheryorov/fenwick)
@@ -353,3 +354,40 @@ go test -run='^$' -bench=. -benchmem ./...
 ## Reference
 
 Peter M. Fenwick, *A New Data Structure for Cumulative Frequency Tables*, 1994.
+
+## Atomic batch mutations
+
+Both `Tree[T]` and `ShardedTree[T]` support applying multiple point changes with
+one call:
+
+```go
+err := tree.Apply(
+    fenwick.AddMutation(0, int64(5)),
+    fenwick.SetMutation(3, int64(20)),
+    fenwick.AddMutation(3, int64(-2)),
+)
+if err != nil {
+    // no mutation was applied when validation failed
+}
+```
+
+Mutations are evaluated in the order supplied. This is relevant when several
+mutations target the same index.
+
+`Tree.Apply` acquires its write lock once. Readers and writers observe either
+the state before the complete batch or the state after it.
+
+`ShardedTree.Apply` validates the complete batch first, groups the affected
+indexes by shard, and locks only the touched shards in ascending order. Exact
+read methods observe the complete batch atomically. Fast cross-shard reads keep
+their documented non-snapshot semantics.
+
+Available mutation helpers:
+
+```go
+fenwick.AddMutation(index, delta)
+fenwick.SetMutation(index, value)
+```
+
+An empty batch is a no-op. Invalid indexes or mutation kinds are rejected
+before any changes are made.

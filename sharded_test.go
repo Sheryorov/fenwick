@@ -318,3 +318,82 @@ func TestShardedInjectedOperationsWithDomainModel(t *testing.T) {
 		t.Fatalf("ExactRangeSum(1,3)=%+v, want %+v", got, want)
 	}
 }
+
+func TestShardedApplyBatchAcrossShards(t *testing.T) {
+	t.Parallel()
+
+	ft := NewNumericShardedWithCount([]int64{1, 2, 3, 4, 5, 6}, 3)
+	err := ft.Apply(
+		AddMutation(0, int64(10)),
+		SetMutation(2, int64(30)),
+		AddMutation(5, int64(-1)),
+		AddMutation(2, int64(2)),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	want := []int64{11, 2, 32, 4, 5, 5}
+	if got := ft.Values(); !equalInt64s(got, want) {
+		t.Fatalf("Values()=%v, want %v", got, want)
+	}
+	if got := ft.ExactTotal(); got != 59 {
+		t.Fatalf("ExactTotal()=%d, want 59", got)
+	}
+}
+
+func TestShardedApplyValidatesBeforeMutation(t *testing.T) {
+	t.Parallel()
+
+	ft := NewNumericShardedWithCount([]int64{1, 2, 3, 4}, 2)
+	before := ft.Values()
+
+	err := ft.Apply(
+		SetMutation(0, int64(100)),
+		AddMutation(4, int64(1)),
+	)
+	if !errors.Is(err, ErrIndexOutOfRange) {
+		t.Fatalf("Apply error=%v, want ErrIndexOutOfRange", err)
+	}
+	if got := ft.Values(); !equalInt64s(got, before) {
+		t.Fatalf("invalid batch partially applied: got %v want %v", got, before)
+	}
+}
+
+func TestShardedApplyEmptyAndNil(t *testing.T) {
+	t.Parallel()
+
+	ft := NewNumericShardedWithCount([]int64{1}, 1)
+	if err := ft.Apply(); err != nil {
+		t.Fatalf("empty Apply: %v", err)
+	}
+
+	var nilTree *ShardedTree[int64]
+	if err := nilTree.Apply(); err != nil {
+		t.Fatalf("empty nil Apply: %v", err)
+	}
+	if err := nilTree.Apply(AddMutation(0, int64(1))); !errors.Is(err, ErrIndexOutOfRange) {
+		t.Fatalf("nil Apply error=%v", err)
+	}
+}
+
+func TestShardedApplyWithInjectedOperations(t *testing.T) {
+	t.Parallel()
+
+	values := []metricsModel{{Count: 1, Sum: 1}, {Count: 2, Sum: 2}, {Count: 3, Sum: 3}}
+	ft := NewShardedWithOperationsAndCount(values, 2, metricsOperations{})
+
+	err := ft.Apply(
+		AddMutation(0, metricsModel{Count: 4, Sum: 0.5}),
+		SetMutation(2, metricsModel{Count: 10, Sum: 10}),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got := ft.ExactTotal()
+	want := metricsModel{Count: 17, Sum: 13.5}
+	if got != want {
+		t.Fatalf("ExactTotal()=%+v, want %+v", got, want)
+	}
+}
