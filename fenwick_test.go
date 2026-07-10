@@ -3,6 +3,7 @@ package fenwick
 import (
 	"errors"
 	"math/rand"
+	"slices"
 	"sync"
 	"testing"
 )
@@ -346,4 +347,516 @@ func TestNilOperationsPanics(t *testing.T) {
 		}
 	}()
 	NewWithOperations[int64](nil, nil)
+}
+
+type Metrics struct {
+	Count int64
+	Sum   float64
+}
+
+type MetricsOperations struct{}
+
+func (MetricsOperations) Zero() Metrics {
+	return Metrics{}
+}
+
+func (MetricsOperations) Add(a, b Metrics) Metrics {
+	return Metrics{
+		Count: a.Count + b.Count,
+		Sum:   a.Sum + b.Sum,
+	}
+}
+
+func (MetricsOperations) Sub(a, b Metrics) Metrics {
+	return Metrics{
+		Count: a.Count - b.Count,
+		Sum:   a.Sum - b.Sum,
+	}
+}
+
+func TestTreeWithOperations(t *testing.T) {
+	t.Parallel()
+
+	values := []Metrics{
+		{Count: 1, Sum: 1.5},
+		{Count: 2, Sum: 2.5},
+		{Count: 3, Sum: 4},
+		{Count: 4, Sum: 6},
+	}
+
+	ft := NewWithOperations(values, MetricsOperations{})
+
+	if got := ft.Len(); got != len(values) {
+		t.Fatalf("Len()=%d want %d", got, len(values))
+	}
+
+	if got := ft.Total(); got != (Metrics{Count: 10, Sum: 14}) {
+		t.Fatalf("Total()=%+v", got)
+	}
+
+	prefix, err := ft.PrefixSum(2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := (Metrics{Count: 6, Sum: 8}); prefix != want {
+		t.Fatalf("PrefixSum(2)=%+v want %+v", prefix, want)
+	}
+
+	sum, err := ft.RangeSum(1, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := (Metrics{Count: 9, Sum: 12.5}); sum != want {
+		t.Fatalf("RangeSum(1,3)=%+v want %+v", sum, want)
+	}
+
+	value, err := ft.At(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := (Metrics{Count: 2, Sum: 2.5}); value != want {
+		t.Fatalf("At(1)=%+v want %+v", value, want)
+	}
+
+	if err := ft.Add(1, Metrics{Count: 5, Sum: 1}); err != nil {
+		t.Fatal(err)
+	}
+
+	value, err = ft.At(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := (Metrics{Count: 7, Sum: 3.5}); value != want {
+		t.Fatalf("At(1) after Add=%+v want %+v", value, want)
+	}
+
+	if err := ft.Set(2, Metrics{Count: 10, Sum: 20}); err != nil {
+		t.Fatal(err)
+	}
+
+	value, err = ft.At(2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := (Metrics{Count: 10, Sum: 20}); value != want {
+		t.Fatalf("At(2) after Set=%+v want %+v", value, want)
+	}
+
+	if got := ft.Total(); got != (Metrics{Count: 22, Sum: 31}) {
+		t.Fatalf("Total() after mutations=%+v", got)
+	}
+}
+
+func TestTreeWithOperationFuncs(t *testing.T) {
+	t.Parallel()
+
+	ops := OperationFuncs[Metrics]{
+		ZeroFunc: func() Metrics {
+			return Metrics{}
+		},
+		AddFunc: func(a, b Metrics) Metrics {
+			return Metrics{
+				Count: a.Count + b.Count,
+				Sum:   a.Sum + b.Sum,
+			}
+		},
+		SubFunc: func(a, b Metrics) Metrics {
+			return Metrics{
+				Count: a.Count - b.Count,
+				Sum:   a.Sum - b.Sum,
+			}
+		},
+	}
+
+	ft := NewWithOperations(
+		[]Metrics{
+			{Count: 2, Sum: 3},
+			{Count: 4, Sum: 5},
+			{Count: 6, Sum: 7},
+		},
+		ops,
+	)
+
+	if got := ft.Total(); got != (Metrics{Count: 12, Sum: 15}) {
+		t.Fatalf("Total()=%+v", got)
+	}
+
+	if err := ft.Add(0, Metrics{Count: 3, Sum: 2}); err != nil {
+		t.Fatal(err)
+	}
+
+	sum, err := ft.RangeSum(0, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := (Metrics{Count: 9, Sum: 10}); sum != want {
+		t.Fatalf("RangeSum(0,1)=%+v want %+v", sum, want)
+	}
+}
+
+func TestTreeWithOperationsInputAndValuesIsolation(t *testing.T) {
+	t.Parallel()
+
+	values := []Metrics{
+		{Count: 1, Sum: 1},
+		{Count: 2, Sum: 2},
+	}
+
+	ft := NewWithOperations(values, MetricsOperations{})
+
+	values[0] = Metrics{Count: 100, Sum: 100}
+
+	got, err := ft.At(0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := (Metrics{Count: 1, Sum: 1}); got != want {
+		t.Fatalf("constructor retained input slice: got %+v want %+v", got, want)
+	}
+
+	copied := ft.Values()
+	copied[0] = Metrics{Count: 200, Sum: 200}
+
+	got, err = ft.At(0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := (Metrics{Count: 1, Sum: 1}); got != want {
+		t.Fatalf("Values exposed internal storage: got %+v want %+v", got, want)
+	}
+}
+
+func TestTreeWithOperationsErrorsAndNoOp(t *testing.T) {
+	t.Parallel()
+
+	ft := NewWithOperations(
+		[]Metrics{
+			{Count: 1, Sum: 1},
+			{Count: 2, Sum: 2},
+		},
+		MetricsOperations{},
+	)
+
+	for _, index := range []int{-1, 2} {
+		if _, err := ft.At(index); !errors.Is(err, ErrIndexOutOfRange) {
+			t.Fatalf("At(%d) error=%v", index, err)
+		}
+		if err := ft.Add(index, Metrics{}); !errors.Is(err, ErrIndexOutOfRange) {
+			t.Fatalf("Add(%d) error=%v", index, err)
+		}
+		if err := ft.Set(index, Metrics{}); !errors.Is(err, ErrIndexOutOfRange) {
+			t.Fatalf("Set(%d) error=%v", index, err)
+		}
+		if _, err := ft.PrefixSum(index); !errors.Is(err, ErrIndexOutOfRange) {
+			t.Fatalf("PrefixSum(%d) error=%v", index, err)
+		}
+	}
+
+	for _, r := range [][2]int{
+		{-1, 0},
+		{1, 0},
+		{0, 2},
+	} {
+		if _, err := ft.RangeSum(r[0], r[1]); !errors.Is(err, ErrInvalidRange) {
+			t.Fatalf("RangeSum(%d,%d) error=%v", r[0], r[1], err)
+		}
+	}
+
+	before := ft.Values()
+
+	if err := ft.Add(1, Metrics{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ft.Set(1, before[1]); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := ft.Values(); !slices.Equal(got, before) {
+		t.Fatalf("no-op changed values: got %+v want %+v", got, before)
+	}
+}
+
+func TestEmptyTreeWithOperations(t *testing.T) {
+	t.Parallel()
+
+	ft := NewWithOperations[Metrics](nil, MetricsOperations{})
+
+	if got := ft.Len(); got != 0 {
+		t.Fatalf("Len()=%d", got)
+	}
+	if got := ft.Total(); got != (Metrics{}) {
+		t.Fatalf("Total()=%+v", got)
+	}
+	if got := ft.Values(); len(got) != 0 {
+		t.Fatalf("Values()=%+v", got)
+	}
+}
+
+func TestShardedTreeWithOperations(t *testing.T) {
+	t.Parallel()
+
+	ft := NewShardedWithOperationsAndCount(
+		[]Metrics{
+			{Count: 1, Sum: 1},
+			{Count: 2, Sum: 2},
+			{Count: 3, Sum: 3},
+			{Count: 4, Sum: 4},
+			{Count: 5, Sum: 5},
+			{Count: 6, Sum: 6},
+		},
+		3,
+		MetricsOperations{},
+	)
+
+	if got := ft.ShardCount(); got != 3 {
+		t.Fatalf("ShardCount()=%d want 3", got)
+	}
+
+	if got := ft.Total(); got != (Metrics{Count: 21, Sum: 21}) {
+		t.Fatalf("Total()=%+v", got)
+	}
+
+	if got := ft.ExactTotal(); got != (Metrics{Count: 21, Sum: 21}) {
+		t.Fatalf("ExactTotal()=%+v", got)
+	}
+
+	fast, err := ft.RangeSum(1, 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := (Metrics{Count: 14, Sum: 14}); fast != want {
+		t.Fatalf("RangeSum(1,4)=%+v want %+v", fast, want)
+	}
+
+	exact, err := ft.ExactRangeSum(1, 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := (Metrics{Count: 14, Sum: 14}); exact != want {
+		t.Fatalf("ExactRangeSum(1,4)=%+v want %+v", exact, want)
+	}
+
+	if err := ft.Add(2, Metrics{Count: 7, Sum: 0.5}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := ft.Set(4, Metrics{Count: 20, Sum: 10}); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := ft.ExactTotal(); got != (Metrics{Count: 43, Sum: 26.5}) {
+		t.Fatalf("ExactTotal() after mutations=%+v", got)
+	}
+
+	value, err := ft.At(4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := (Metrics{Count: 20, Sum: 10}); value != want {
+		t.Fatalf("At(4)=%+v want %+v", value, want)
+	}
+}
+
+func TestShardedTreeWithOperationsReadPaths(t *testing.T) {
+	t.Parallel()
+
+	ft := NewShardedWithOperationsAndCount(
+		[]Metrics{
+			{Count: 1, Sum: 10},
+			{Count: 2, Sum: 20},
+			{Count: 3, Sum: 30},
+			{Count: 4, Sum: 40},
+			{Count: 5, Sum: 50},
+			{Count: 6, Sum: 60},
+		},
+		3,
+		MetricsOperations{},
+	)
+
+	checks := []struct {
+		left  int
+		right int
+		want  Metrics
+	}{
+		{0, 0, Metrics{Count: 1, Sum: 10}},
+		{0, 1, Metrics{Count: 3, Sum: 30}},
+		{1, 4, Metrics{Count: 14, Sum: 140}},
+		{2, 5, Metrics{Count: 18, Sum: 180}},
+	}
+
+	for _, tc := range checks {
+		fast, err := ft.RangeSum(tc.left, tc.right)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if fast != tc.want {
+			t.Fatalf(
+				"RangeSum(%d,%d)=%+v want %+v",
+				tc.left,
+				tc.right,
+				fast,
+				tc.want,
+			)
+		}
+
+		exact, err := ft.ExactRangeSum(tc.left, tc.right)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if exact != tc.want {
+			t.Fatalf(
+				"ExactRangeSum(%d,%d)=%+v want %+v",
+				tc.left,
+				tc.right,
+				exact,
+				tc.want,
+			)
+		}
+	}
+
+	wantPrefixes := []Metrics{
+		{Count: 1, Sum: 10},
+		{Count: 3, Sum: 30},
+		{Count: 6, Sum: 60},
+		{Count: 10, Sum: 100},
+		{Count: 15, Sum: 150},
+		{Count: 21, Sum: 210},
+	}
+
+	for index, want := range wantPrefixes {
+		fast, err := ft.PrefixSum(index)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if fast != want {
+			t.Fatalf("PrefixSum(%d)=%+v want %+v", index, fast, want)
+		}
+
+		exact, err := ft.ExactPrefixSum(index)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if exact != want {
+			t.Fatalf(
+				"ExactPrefixSum(%d)=%+v want %+v",
+				index,
+				exact,
+				want,
+			)
+		}
+	}
+}
+
+func TestShardedTreeWithOperationFuncs(t *testing.T) {
+	t.Parallel()
+
+	ops := OperationFuncs[Metrics]{
+		ZeroFunc: func() Metrics {
+			return Metrics{}
+		},
+		AddFunc: func(a, b Metrics) Metrics {
+			return Metrics{
+				Count: a.Count + b.Count,
+				Sum:   a.Sum + b.Sum,
+			}
+		},
+		SubFunc: func(a, b Metrics) Metrics {
+			return Metrics{
+				Count: a.Count - b.Count,
+				Sum:   a.Sum - b.Sum,
+			}
+		},
+	}
+
+	ft := NewShardedWithOperationsAndCount(
+		[]Metrics{
+			{Count: 1, Sum: 2},
+			{Count: 3, Sum: 4},
+			{Count: 5, Sum: 6},
+			{Count: 7, Sum: 8},
+		},
+		2,
+		ops,
+	)
+
+	if got := ft.ExactTotal(); got != (Metrics{Count: 16, Sum: 20}) {
+		t.Fatalf("ExactTotal()=%+v", got)
+	}
+
+	if err := ft.Add(3, Metrics{Count: 1, Sum: 2}); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := ft.ExactTotal(); got != (Metrics{Count: 17, Sum: 22}) {
+		t.Fatalf("ExactTotal() after Add=%+v", got)
+	}
+}
+
+func TestShardedTreeWithOperationsErrorsAndNoOp(t *testing.T) {
+	t.Parallel()
+
+	ft := NewShardedWithOperationsAndCount(
+		[]Metrics{
+			{Count: 1, Sum: 1},
+			{Count: 2, Sum: 2},
+			{Count: 3, Sum: 3},
+		},
+		2,
+		MetricsOperations{},
+	)
+
+	for _, index := range []int{-1, 3} {
+		if _, err := ft.At(index); !errors.Is(err, ErrIndexOutOfRange) {
+			t.Fatalf("At(%d) error=%v", index, err)
+		}
+		if err := ft.Add(index, Metrics{}); !errors.Is(err, ErrIndexOutOfRange) {
+			t.Fatalf("Add(%d) error=%v", index, err)
+		}
+		if err := ft.Set(index, Metrics{}); !errors.Is(err, ErrIndexOutOfRange) {
+			t.Fatalf("Set(%d) error=%v", index, err)
+		}
+		if _, err := ft.PrefixSum(index); !errors.Is(err, ErrIndexOutOfRange) {
+			t.Fatalf("PrefixSum(%d) error=%v", index, err)
+		}
+		if _, err := ft.ExactPrefixSum(index); !errors.Is(err, ErrIndexOutOfRange) {
+			t.Fatalf("ExactPrefixSum(%d) error=%v", index, err)
+		}
+	}
+
+	for _, r := range [][2]int{
+		{-1, 0},
+		{2, 1},
+		{0, 3},
+	} {
+		if _, err := ft.RangeSum(r[0], r[1]); !errors.Is(err, ErrInvalidRange) {
+			t.Fatalf("RangeSum(%d,%d) error=%v", r[0], r[1], err)
+		}
+		if _, err := ft.ExactRangeSum(r[0], r[1]); !errors.Is(err, ErrInvalidRange) {
+			t.Fatalf("ExactRangeSum(%d,%d) error=%v", r[0], r[1], err)
+		}
+	}
+
+	before := ft.Values()
+
+	if err := ft.Add(1, Metrics{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ft.Set(1, before[1]); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := ft.Values(); !slices.Equal(got, before) {
+		t.Fatalf("no-op changed values: got %+v want %+v", got, before)
+	}
+
+	copied := ft.Values()
+	copied[0] = Metrics{Count: 100, Sum: 100}
+
+	got, err := ft.At(0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := (Metrics{Count: 1, Sum: 1}); got != want {
+		t.Fatalf("Values exposed internal storage: got %+v want %+v", got, want)
+	}
 }
