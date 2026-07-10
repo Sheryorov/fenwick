@@ -10,7 +10,7 @@ import (
 func TestTree(t *testing.T) {
 	t.Parallel()
 
-	ft := New([]int64{3, 2, 5, 1, 4})
+	ft := New[int64]([]int64{3, 2, 5, 1, 4})
 
 	if got := ft.Len(); got != 5 {
 		t.Fatalf("Len()=%d, want 5", got)
@@ -47,7 +47,7 @@ func TestTree(t *testing.T) {
 func TestEmptyAndErrors(t *testing.T) {
 	t.Parallel()
 
-	ft := New(nil)
+	ft := New[int64](nil)
 	if ft.Len() != 0 || ft.Total() != 0 {
 		t.Fatalf("empty tree has Len=%d Total=%d", ft.Len(), ft.Total())
 	}
@@ -66,7 +66,7 @@ func TestEmptyAndErrors(t *testing.T) {
 func TestValuesReturnsCopy(t *testing.T) {
 	t.Parallel()
 
-	ft := New([]int64{1, 2, 3})
+	ft := New[int64]([]int64{1, 2, 3})
 	values := ft.Values()
 	values[0] = 999
 
@@ -86,7 +86,7 @@ func TestRandomAgainstNaive(t *testing.T) {
 		values[i] = int64(rng.Intn(2001) - 1000)
 	}
 
-	ft := New(values)
+	ft := New[int64](values)
 	naive := append([]int64(nil), values...)
 
 	for step := 0; step < 10_000; step++ {
@@ -124,7 +124,7 @@ func TestRandomAgainstNaive(t *testing.T) {
 }
 
 func TestConcurrentAccess(t *testing.T) {
-	ft := New(make([]int64, 128))
+	ft := New[int64](make([]int64, 128))
 
 	var wg sync.WaitGroup
 	for g := 0; g < 8; g++ {
@@ -164,7 +164,7 @@ func FuzzTreeAgainstNaive(f *testing.F) {
 		for i, value := range data {
 			values[i] = int64(int8(value))
 		}
-		ft := New(values)
+		ft := New[int64](values)
 		naive := append([]int64(nil), values...)
 
 		if len(naive) == 0 {
@@ -204,7 +204,7 @@ func BenchmarkTreeRangeSum(b *testing.B) {
 	for i := range values {
 		values[i] = int64(i)
 	}
-	ft := New(values)
+	ft := New[int64](values)
 
 	b.ReportAllocs()
 	b.ResetTimer()
@@ -217,7 +217,7 @@ func BenchmarkTreeRangeSum(b *testing.B) {
 }
 
 func BenchmarkTreeAdd(b *testing.B) {
-	ft := New(make([]int64, 1<<20))
+	ft := New[int64](make([]int64, 1<<20))
 
 	b.ReportAllocs()
 	b.ResetTimer()

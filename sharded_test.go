@@ -11,7 +11,7 @@ import (
 func TestShardedTree(t *testing.T) {
 	t.Parallel()
 
-	ft := NewShardedWithCount([]int64{3, 2, 5, 1, 4}, 3)
+	ft := NewShardedWithCount[int64]([]int64{3, 2, 5, 1, 4}, 3)
 	if got := ft.Len(); got != 5 {
 		t.Fatalf("Len()=%d, want 5", got)
 	}
@@ -57,7 +57,7 @@ func TestShardedTree(t *testing.T) {
 func TestShardedErrors(t *testing.T) {
 	t.Parallel()
 
-	ft := NewShardedWithCount(nil, 4)
+	ft := NewShardedWithCount[int64](nil, 4)
 	if ft.Len() != 0 || ft.Total() != 0 || ft.ExactTotal() != 0 {
 		t.Fatalf("unexpected empty state")
 	}
@@ -78,7 +78,7 @@ func TestShardedRandomAgainstNaive(t *testing.T) {
 	for i := range values {
 		values[i] = int64(rng.Intn(2001) - 1000)
 	}
-	ft := NewShardedWithCount(values, 17)
+	ft := NewShardedWithCount[int64](values, 17)
 	naive := append([]int64(nil), values...)
 
 	for step := 0; step < 20_000; step++ {
@@ -123,7 +123,7 @@ func TestShardedConcurrentUpdates(t *testing.T) {
 		workers = 16
 		loops   = 20_000
 	)
-	ft := NewShardedWithCount(make([]int64, n), workers)
+	ft := NewShardedWithCount[int64](make([]int64, n), workers)
 
 	var wg sync.WaitGroup
 	for worker := 0; worker < workers; worker++ {
@@ -150,18 +150,18 @@ func TestShardedConcurrentUpdates(t *testing.T) {
 }
 
 func BenchmarkConcurrentAddSingleMutex(b *testing.B) {
-	benchmarkConcurrentAdd(b, func(n int) addTarget { return New(make([]int64, n)) })
+	benchmarkConcurrentAdd(b, func(n int) addTarget { return New[int64](make([]int64, n)) })
 }
 
 func BenchmarkConcurrentAddSharded(b *testing.B) {
 	benchmarkConcurrentAdd(b, func(n int) addTarget {
-		return NewShardedWithCount(make([]int64, n), max(1, runtime.GOMAXPROCS(0)*4))
+		return NewShardedWithCount[int64](make([]int64, n), max(1, runtime.GOMAXPROCS(0)*4))
 	})
 }
 
 func BenchmarkShardedRangeSumFast(b *testing.B) {
 	values := make([]int64, 1<<20)
-	ft := NewShardedWithCount(values, max(1, runtime.GOMAXPROCS(0)*4))
+	ft := NewShardedWithCount[int64](values, max(1, runtime.GOMAXPROCS(0)*4))
 	mask := len(values) - 1
 	b.ReportAllocs()
 	b.ResetTimer()
@@ -175,7 +175,7 @@ func BenchmarkShardedRangeSumFast(b *testing.B) {
 
 func BenchmarkShardedRangeSumExact(b *testing.B) {
 	values := make([]int64, 1<<20)
-	ft := NewShardedWithCount(values, max(1, runtime.GOMAXPROCS(0)*4))
+	ft := NewShardedWithCount[int64](values, max(1, runtime.GOMAXPROCS(0)*4))
 	mask := len(values) - 1
 	b.ReportAllocs()
 	b.ResetTimer()

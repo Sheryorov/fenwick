@@ -1,10 +1,24 @@
 # fenwick
 
-A zero-based, concurrency-safe Fenwick tree for `int64` point updates and range sums.
+[![Build](https://github.com/Sheryorov/fenwick/workflows/Build/badge.svg)](https://github.com/Sheryorov/fenwick/actions)
+[![Tests](https://github.com/Sheryorov/fenwick/workflows/Tests/badge.svg)](https://github.com/Sheryorov/fenwick/actions)
+[![codecov](https://codecov.io/gh/Sheryorov/fenwick/graph/badge.svg)](https://codecov.io/gh/Sheryorov/fenwick)
+[![Go Report Card](https://goreportcard.com/badge/github.com/Sheryorov/fenwick)](https://goreportcard.com/report/github.com/Sheryorov/fenwick)
+
+A zero-based, concurrency-safe Fenwick tree for generic numeric types supporting point updates and range sums.
+
+## Supported Types
+
+The `Tree[T]` and `ShardedTree[T]` types work with:
+- Signed integers: `int`, `int8`, `int16`, `int32`, `int64`
+- Unsigned integers: `uint`, `uint8`, `uint16`, `uint32`, `uint64`
+- Floating point: `float32`, `float64`
 
 ## API
 
-- `New(values)` — O(n)
+### Tree[T]
+
+- `New[T](values)` — O(n)
 - `Len()` — O(1)
 - `Add(index, delta)` — O(log n)
 - `Set(index, value)` — O(log n)
@@ -16,7 +30,7 @@ A zero-based, concurrency-safe Fenwick tree for `int64` point updates and range 
 
 The implementation copies its input, validates public indexes and ranges, and is safe for concurrent readers and writers using `sync.RWMutex`.
 
-Arithmetic uses `int64`; overflow is not detected.
+Arithmetic uses the generic type `T` and does not detect overflow.
 
 ## Verify
 
@@ -30,7 +44,10 @@ go vet ./...
 
 ## Usage
 
+### Tree[T]
+
 ```go
+// Works with any Numeric type
 ft := fenwick.New([]int64{3, 2, 5, 1, 4})
 
 sum, err := ft.RangeSum(1, 3) // 8
@@ -39,15 +56,19 @@ if err != nil {
 }
 
 err = ft.Set(2, 10)
+
+// With floats
+ff := fenwick.New([]float64{1.5, 2.3, 3.7})
+total := ff.Total() // 7.5
 ```
 
 ## Sharded tree for write-heavy concurrency
 
-`ShardedTree` splits values into independent contiguous Fenwick trees. Point
+`ShardedTree[T]` splits values into independent contiguous Fenwick trees. Point
 updates to different shards can execute concurrently.
 
 ```go
-ft := fenwick.NewShardedWithCount(values, 32)
+ft := fenwick.NewShardedWithCount([]int64{...}, 32)
 
 _ = ft.Add(100, 5)
 _ = ft.Set(200, 9)
@@ -62,20 +83,20 @@ exact, _ := ft.ExactRangeSum(50, 250)
 _, _ = sum, exact
 ```
 
-Available constructors:
+### Constructors
 
-- `NewSharded(values)` chooses approximately `4 * GOMAXPROCS` shards.
-- `NewShardedWithCount(values, shardCount)` uses an explicit shard count.
+- `NewSharded[T](values)` chooses approximately `4 * GOMAXPROCS` shards.
+- `NewShardedWithCount[T](values, shardCount)` uses an explicit shard count.
 
-Fast methods:
+### Fast methods
 
 - `PrefixSum`, `RangeSum`, `Total`
-- lock only boundary shards and use atomic totals for complete shards;
+- lock only boundary shards;
 - optimized for throughput;
 - during concurrent writes, the result may combine states observed at slightly
   different instants.
 
-Strict snapshot methods:
+### Strict snapshot methods
 
 - `ExactPrefixSum`, `ExactRangeSum`, `ExactTotal`, `Values`
 - lock all involved shards in ascending order;

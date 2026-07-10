@@ -15,24 +15,31 @@ var (
 	ErrInvalidRange = errors.New("fenwick: invalid range")
 )
 
-// Tree stores signed 64-bit values.
+// Numeric is a constraint for numeric types that support addition and subtraction.
+type Numeric interface {
+	~int | ~int8 | ~int16 | ~int32 | ~int64 |
+		~uint | ~uint8 | ~uint16 | ~uint32 | ~uint64 |
+		~float32 | ~float64
+}
+
+// Tree stores generic numeric values.
 //
 // Public indexes are zero-based. Internally, the Fenwick representation is
 // one-based. All exported methods are safe for concurrent use.
 //
-// Arithmetic uses int64 and does not detect overflow.
-type Tree struct {
+// Arithmetic uses the generic type T and does not detect overflow.
+type Tree[T Numeric] struct {
 	mu   sync.RWMutex
-	tree []int64 // one-based Fenwick storage; tree[0] is unused
-	vals []int64 // zero-based values, retained to support Set and At in O(1)
+	tree []T // one-based Fenwick storage; tree[0] is unused
+	vals []T // zero-based values, retained to support Set and At in O(1)
 }
 
 // New constructs a Tree from values in O(n) time. The input slice is copied,
 // so later changes to values do not affect the Tree.
-func New(values []int64) *Tree {
-	t := &Tree{
-		tree: make([]int64, len(values)+1),
-		vals: append([]int64(nil), values...),
+func New[T Numeric](values []T) *Tree[T] {
+	t := &Tree[T]{
+		tree: make([]T, len(values)+1),
+		vals: append([]T(nil), values...),
 	}
 
 	// Linear-time Fenwick construction. Each node starts with its own value,
@@ -51,7 +58,7 @@ func New(values []int64) *Tree {
 }
 
 // Len returns the number of stored values.
-func (t *Tree) Len() int {
+func (t *Tree[T]) Len() int {
 	if t == nil {
 		return 0
 	}
@@ -62,22 +69,23 @@ func (t *Tree) Len() int {
 }
 
 // At returns the value at index.
-func (t *Tree) At(index int) (int64, error) {
+func (t *Tree[T]) At(index int) (T, error) {
+	var zero T
 	if t == nil {
-		return 0, indexError(index, 0)
+		return zero, indexError(index, 0)
 	}
 
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 
 	if err := validateIndex(index, len(t.vals)); err != nil {
-		return 0, err
+		return zero, err
 	}
 	return t.vals[index], nil
 }
 
 // Add increments the value at index by delta in O(log n).
-func (t *Tree) Add(index int, delta int64) error {
+func (t *Tree[T]) Add(index int, delta T) error {
 	if t == nil {
 		return indexError(index, 0)
 	}
@@ -95,7 +103,7 @@ func (t *Tree) Add(index int, delta int64) error {
 }
 
 // Set replaces the value at index in O(log n).
-func (t *Tree) Set(index int, value int64) error {
+func (t *Tree[T]) Set(index int, value T) error {
 	if t == nil {
 		return indexError(index, 0)
 	}
@@ -108,7 +116,8 @@ func (t *Tree) Set(index int, value int64) error {
 	}
 
 	delta := value - t.vals[index]
-	if delta == 0 {
+	var zero T
+	if delta == zero {
 		return nil
 	}
 
@@ -118,31 +127,33 @@ func (t *Tree) Set(index int, value int64) error {
 }
 
 // PrefixSum returns the inclusive sum values[0:index+1] in O(log n).
-func (t *Tree) PrefixSum(index int) (int64, error) {
+func (t *Tree[T]) PrefixSum(index int) (T, error) {
+	var zero T
 	if t == nil {
-		return 0, indexError(index, 0)
+		return zero, indexError(index, 0)
 	}
 
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 
 	if err := validateIndex(index, len(t.vals)); err != nil {
-		return 0, err
+		return zero, err
 	}
 	return t.prefixSumLocked(index + 1), nil
 }
 
 // RangeSum returns the inclusive sum values[left:right+1] in O(log n).
-func (t *Tree) RangeSum(left, right int) (int64, error) {
+func (t *Tree[T]) RangeSum(left, right int) (T, error) {
+	var zero T
 	if t == nil {
-		return 0, rangeError(left, right, 0)
+		return zero, rangeError(left, right, 0)
 	}
 
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 
 	if err := validateRange(left, right, len(t.vals)); err != nil {
-		return 0, err
+		return zero, err
 	}
 
 	rightSum := t.prefixSumLocked(right + 1)
@@ -151,9 +162,10 @@ func (t *Tree) RangeSum(left, right int) (int64, error) {
 }
 
 // Total returns the sum of all values. For an empty Tree, Total returns 0.
-func (t *Tree) Total() int64 {
+func (t *Tree[T]) Total() T {
+	var zero T
 	if t == nil {
-		return 0
+		return zero
 	}
 
 	t.mu.RLock()
@@ -162,24 +174,24 @@ func (t *Tree) Total() int64 {
 }
 
 // Values returns a copy of the current values.
-func (t *Tree) Values() []int64 {
+func (t *Tree[T]) Values() []T {
 	if t == nil {
 		return nil
 	}
 
 	t.mu.RLock()
 	defer t.mu.RUnlock()
-	return append([]int64(nil), t.vals...)
+	return append([]T(nil), t.vals...)
 }
 
-func (t *Tree) addLocked(internalIndex int, delta int64) {
+func (t *Tree[T]) addLocked(internalIndex int, delta T) {
 	for i := internalIndex; i < len(t.tree); i += lowbit(i) {
 		t.tree[i] += delta
 	}
 }
 
-func (t *Tree) prefixSumLocked(internalIndex int) int64 {
-	var sum int64
+func (t *Tree[T]) prefixSumLocked(internalIndex int) T {
+	var sum T
 	for i := internalIndex; i > 0; i -= lowbit(i) {
 		sum += t.tree[i]
 	}
