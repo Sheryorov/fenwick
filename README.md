@@ -1,11 +1,11 @@
-# Fenwick Tree for Go
-
 [![Build](https://github.com/Sheryorov/fenwick/actions/workflows/build.yml/badge.svg?branch=master)](https://github.com/Sheryorov/fenwick/actions/workflows/build.yml)
 [![Tests](https://github.com/Sheryorov/fenwick/actions/workflows/tests.yml/badge.svg?branch=master)](https://github.com/Sheryorov/fenwick/actions/workflows/tests.yml)
 [![codecov](https://codecov.io/gh/Sheryorov/fenwick/branch/master/graph/badge.svg)](https://codecov.io/gh/Sheryorov/fenwick)
-[![Go Report Card](https://goreportcard.com/badge/github.com/Sheryorov/fenwick)](https://goreportcard.com/report/github.com/Sheryorov/fenwick)
 [![Go Reference](https://pkg.go.dev/badge/github.com/Sheryorov/fenwick.svg)](https://pkg.go.dev/github.com/Sheryorov/fenwick)
 [![Go Version](https://img.shields.io/github/go-mod/go-version/Sheryorov/fenwick)](https://github.com/Sheryorov/fenwick/blob/master/go.mod)
+[![GitHub Release](https://img.shields.io/github/v/release/Sheryorov/fenwick)](https://github.com/Sheryorov/fenwick/releases)
+[![GitHub issues](https://img.shields.io/github/issues/Sheryorov/fenwick)](https://github.com/Sheryorov/fenwick/issues)
+[![GitHub stars](https://img.shields.io/github/stars/Sheryorov/fenwick?style=social)](https://github.com/Sheryorov/fenwick/stargazers)
 
 A zero-based, concurrency-safe Fenwick tree (Binary Indexed Tree) for Go.
 
