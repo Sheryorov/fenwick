@@ -860,3 +860,373 @@ func TestShardedTreeWithOperationsErrorsAndNoOp(t *testing.T) {
 		t.Fatalf("Values exposed internal storage: got %+v want %+v", got, want)
 	}
 }
+
+func TestIntValueOperations(t *testing.T) {
+	t.Parallel()
+
+	a := Int(10)
+	b := Int(4)
+
+	if got := a.Add(b); got != Int(14) {
+		t.Fatalf("Add()=%v want %v", got, Int(14))
+	}
+
+	if got := a.Sub(b); got != Int(6) {
+		t.Fatalf("Sub()=%v want %v", got, Int(6))
+	}
+
+	if got := a.Zero(); got != Int(0) {
+		t.Fatalf("Zero()=%v want %v", got, Int(0))
+	}
+}
+
+func TestInt64ValueOperations(t *testing.T) {
+	t.Parallel()
+
+	a := Int64(100)
+	b := Int64(35)
+
+	if got := a.Add(b); got != Int64(135) {
+		t.Fatalf("Add()=%v want %v", got, Int64(135))
+	}
+
+	if got := a.Sub(b); got != Int64(65) {
+		t.Fatalf("Sub()=%v want %v", got, Int64(65))
+	}
+
+	if got := a.Zero(); got != Int64(0) {
+		t.Fatalf("Zero()=%v want %v", got, Int64(0))
+	}
+}
+
+func TestUintValueOperations(t *testing.T) {
+	t.Parallel()
+
+	a := Uint(10)
+	b := Uint(4)
+
+	if got := a.Add(b); got != Uint(14) {
+		t.Fatalf("Add()=%v want %v", got, Uint(14))
+	}
+
+	if got := a.Sub(b); got != Uint(6) {
+		t.Fatalf("Sub()=%v want %v", got, Uint(6))
+	}
+
+	if got := a.Zero(); got != Uint(0) {
+		t.Fatalf("Zero()=%v want %v", got, Uint(0))
+	}
+}
+
+func TestUint64ValueOperations(t *testing.T) {
+	t.Parallel()
+
+	a := Uint64(100)
+	b := Uint64(35)
+
+	if got := a.Add(b); got != Uint64(135) {
+		t.Fatalf("Add()=%v want %v", got, Uint64(135))
+	}
+
+	if got := a.Sub(b); got != Uint64(65) {
+		t.Fatalf("Sub()=%v want %v", got, Uint64(65))
+	}
+
+	if got := a.Zero(); got != Uint64(0) {
+		t.Fatalf("Zero()=%v want %v", got, Uint64(0))
+	}
+}
+
+func TestFloat32ValueOperations(t *testing.T) {
+	t.Parallel()
+
+	a := Float32(10.5)
+	b := Float32(4.25)
+
+	if got := a.Add(b); got != Float32(14.75) {
+		t.Fatalf("Add()=%v want %v", got, Float32(14.75))
+	}
+
+	if got := a.Sub(b); got != Float32(6.25) {
+		t.Fatalf("Sub()=%v want %v", got, Float32(6.25))
+	}
+
+	if got := a.Zero(); got != Float32(0) {
+		t.Fatalf("Zero()=%v want %v", got, Float32(0))
+	}
+}
+
+func TestFloat64ValueOperations(t *testing.T) {
+	t.Parallel()
+
+	a := Float64(100.5)
+	b := Float64(35.25)
+
+	if got := a.Add(b); got != Float64(135.75) {
+		t.Fatalf("Add()=%v want %v", got, Float64(135.75))
+	}
+
+	if got := a.Sub(b); got != Float64(65.25) {
+		t.Fatalf("Sub()=%v want %v", got, Float64(65.25))
+	}
+
+	if got := a.Zero(); got != Float64(0) {
+		t.Fatalf("Zero()=%v want %v", got, Float64(0))
+	}
+}
+
+func TestValueWrappersThroughTree(t *testing.T) {
+	t.Parallel()
+
+	t.Run("Int", func(t *testing.T) {
+		t.Parallel()
+
+		tree := New([]Int{1, 2, 3})
+
+		if got := tree.Total(); got != Int(6) {
+			t.Fatalf("Total()=%v want %v", got, Int(6))
+		}
+
+		if err := tree.Add(1, Int(5)); err != nil {
+			t.Fatal(err)
+		}
+
+		if got := tree.Total(); got != Int(11) {
+			t.Fatalf("Total() after Add=%v want %v", got, Int(11))
+		}
+
+		if err := tree.Set(2, Int(10)); err != nil {
+			t.Fatal(err)
+		}
+
+		if got := tree.Total(); got != Int(18) {
+			t.Fatalf("Total() after Set=%v want %v", got, Int(18))
+		}
+	})
+
+	t.Run("Int64", func(t *testing.T) {
+		t.Parallel()
+
+		tree := New([]Int64{10, 20, 30})
+
+		sum, err := tree.RangeSum(1, 2)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if sum != Int64(50) {
+			t.Fatalf("RangeSum()=%v want %v", sum, Int64(50))
+		}
+	})
+
+	t.Run("Uint", func(t *testing.T) {
+		t.Parallel()
+
+		tree := New([]Uint{1, 2, 3})
+
+		if got := tree.Total(); got != Uint(6) {
+			t.Fatalf("Total()=%v want %v", got, Uint(6))
+		}
+
+		if err := tree.Set(1, Uint(5)); err != nil {
+			t.Fatal(err)
+		}
+
+		if got := tree.Total(); got != Uint(9) {
+			t.Fatalf("Total() after Set=%v want %v", got, Uint(9))
+		}
+	})
+
+	t.Run("Uint64", func(t *testing.T) {
+		t.Parallel()
+
+		tree := New([]Uint64{10, 20, 30})
+
+		if err := tree.Add(0, Uint64(5)); err != nil {
+			t.Fatal(err)
+		}
+
+		if got := tree.Total(); got != Uint64(65) {
+			t.Fatalf("Total()=%v want %v", got, Uint64(65))
+		}
+	})
+
+	t.Run("Float32", func(t *testing.T) {
+		t.Parallel()
+
+		tree := New([]Float32{1.25, 2.5, 3.75})
+
+		if got := tree.Total(); got != Float32(7.5) {
+			t.Fatalf("Total()=%v want %v", got, Float32(7.5))
+		}
+	})
+
+	t.Run("Float64", func(t *testing.T) {
+		t.Parallel()
+
+		tree := New([]Float64{1.5, 2.25, 3.75})
+
+		sum, err := tree.RangeSum(0, 1)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if sum != Float64(3.75) {
+			t.Fatalf("RangeSum()=%v want %v", sum, Float64(3.75))
+		}
+	})
+}
+
+func TestValueWrappersThroughShardedTree(t *testing.T) {
+	t.Parallel()
+
+	tree := NewShardedWithCount(
+		[]Int64{1, 2, 3, 4, 5, 6},
+		3,
+	)
+
+	if got := tree.ExactTotal(); got != Int64(21) {
+		t.Fatalf("ExactTotal()=%v want %v", got, Int64(21))
+	}
+
+	if err := tree.Add(2, Int64(10)); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := tree.ExactTotal(); got != Int64(31) {
+		t.Fatalf("ExactTotal() after Add=%v want %v", got, Int64(31))
+	}
+
+	if err := tree.Set(4, Int64(20)); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := tree.ExactTotal(); got != Int64(46) {
+		t.Fatalf("ExactTotal() after Set=%v want %v", got, Int64(46))
+	}
+
+	sum, err := tree.ExactRangeSum(1, 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if sum != Int64(39) {
+		t.Fatalf("ExactRangeSum()=%v want %v", sum, Int64(39))
+	}
+}
+
+func TestValueOperationsPanicOnMismatchedConcreteType(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		fn   func()
+	}{
+		{
+			name: "Int.Add",
+			fn: func() {
+				_ = Int(1).Add(Int64(2))
+			},
+		},
+		{
+			name: "Int.Sub",
+			fn: func() {
+				_ = Int(1).Sub(Int64(2))
+			},
+		},
+		{
+			name: "Int64.Add",
+			fn: func() {
+				_ = Int64(1).Add(Int(2))
+			},
+		},
+		{
+			name: "Int64.Sub",
+			fn: func() {
+				_ = Int64(1).Sub(Int(2))
+			},
+		},
+		{
+			name: "Uint.Add",
+			fn: func() {
+				_ = Uint(1).Add(Uint64(2))
+			},
+		},
+		{
+			name: "Uint.Sub",
+			fn: func() {
+				_ = Uint(1).Sub(Uint64(2))
+			},
+		},
+		{
+			name: "Uint64.Add",
+			fn: func() {
+				_ = Uint64(1).Add(Uint(2))
+			},
+		},
+		{
+			name: "Uint64.Sub",
+			fn: func() {
+				_ = Uint64(1).Sub(Uint(2))
+			},
+		},
+		{
+			name: "Float32.Add",
+			fn: func() {
+				_ = Float32(1).Add(Float64(2))
+			},
+		},
+		{
+			name: "Float32.Sub",
+			fn: func() {
+				_ = Float32(1).Sub(Float64(2))
+			},
+		},
+		{
+			name: "Float64.Add",
+			fn: func() {
+				_ = Float64(1).Add(Float32(2))
+			},
+		},
+		{
+			name: "Float64.Sub",
+			fn: func() {
+				_ = Float64(1).Sub(Float32(2))
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			defer func() {
+				if recover() == nil {
+					t.Fatalf("expected panic")
+				}
+			}()
+
+			tc.fn()
+		})
+	}
+}
+
+func TestUnsignedSubtractionUnderflowUsesGoSemantics(t *testing.T) {
+	t.Parallel()
+
+	got := Uint(1).Sub(Uint(2))
+	want := Uint(^uint(0))
+
+	if got != want {
+		t.Fatalf("Uint underflow=%v want %v", got, want)
+	}
+
+	got64 := Uint64(1).Sub(Uint64(2))
+	want64 := Uint64(^uint64(0))
+
+	if got64 != want64 {
+		t.Fatalf("Uint64 underflow=%v want %v", got64, want64)
+	}
+}
