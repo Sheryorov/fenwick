@@ -11,7 +11,7 @@ import (
 func TestShardedTree(t *testing.T) {
 	t.Parallel()
 
-	ft := NewShardedWithCount[int64]([]int64{3, 2, 5, 1, 4}, 3)
+	ft := NewNumericShardedWithCount[int64]([]int64{3, 2, 5, 1, 4}, 3)
 	if got := ft.Len(); got != 5 {
 		t.Fatalf("Len()=%d, want 5", got)
 	}
@@ -57,7 +57,7 @@ func TestShardedTree(t *testing.T) {
 func TestShardedErrors(t *testing.T) {
 	t.Parallel()
 
-	ft := NewShardedWithCount[int64](nil, 4)
+	ft := NewNumericShardedWithCount[int64](nil, 4)
 	if ft.Len() != 0 || ft.Total() != 0 || ft.ExactTotal() != 0 {
 		t.Fatalf("unexpected empty state")
 	}
@@ -78,7 +78,7 @@ func TestShardedRandomAgainstNaive(t *testing.T) {
 	for i := range values {
 		values[i] = int64(rng.Intn(2001) - 1000)
 	}
-	ft := NewShardedWithCount[int64](values, 17)
+	ft := NewNumericShardedWithCount[int64](values, 17)
 	naive := append([]int64(nil), values...)
 
 	for step := 0; step < 20_000; step++ {
@@ -123,7 +123,7 @@ func TestShardedConcurrentUpdates(t *testing.T) {
 		workers = 16
 		loops   = 20_000
 	)
-	ft := NewShardedWithCount[int64](make([]int64, n), workers)
+	ft := NewNumericShardedWithCount[int64](make([]int64, n), workers)
 
 	var wg sync.WaitGroup
 	for worker := 0; worker < workers; worker++ {
@@ -150,18 +150,18 @@ func TestShardedConcurrentUpdates(t *testing.T) {
 }
 
 func BenchmarkConcurrentAddSingleMutex(b *testing.B) {
-	benchmarkConcurrentAdd(b, func(n int) addTarget { return New[int64](make([]int64, n)) })
+	benchmarkConcurrentAdd(b, func(n int) addTarget { return NewNumeric[int64](make([]int64, n)) })
 }
 
 func BenchmarkConcurrentAddSharded(b *testing.B) {
 	benchmarkConcurrentAdd(b, func(n int) addTarget {
-		return NewShardedWithCount[int64](make([]int64, n), max(1, runtime.GOMAXPROCS(0)*4))
+		return NewNumericShardedWithCount[int64](make([]int64, n), max(1, runtime.GOMAXPROCS(0)*4))
 	})
 }
 
 func BenchmarkShardedRangeSumFast(b *testing.B) {
 	values := make([]int64, 1<<20)
-	ft := NewShardedWithCount[int64](values, max(1, runtime.GOMAXPROCS(0)*4))
+	ft := NewNumericShardedWithCount[int64](values, max(1, runtime.GOMAXPROCS(0)*4))
 	mask := len(values) - 1
 	b.ReportAllocs()
 	b.ResetTimer()
@@ -175,7 +175,7 @@ func BenchmarkShardedRangeSumFast(b *testing.B) {
 
 func BenchmarkShardedRangeSumExact(b *testing.B) {
 	values := make([]int64, 1<<20)
-	ft := NewShardedWithCount[int64](values, max(1, runtime.GOMAXPROCS(0)*4))
+	ft := NewNumericShardedWithCount[int64](values, max(1, runtime.GOMAXPROCS(0)*4))
 	mask := len(values) - 1
 	b.ReportAllocs()
 	b.ResetTimer()
@@ -216,7 +216,7 @@ func TestNilShardedTreeOperations(t *testing.T) {
 func TestShardedSingleShard(t *testing.T) {
 	t.Parallel()
 
-	ft := NewShardedWithCount[int64]([]int64{5}, 1)
+	ft := NewNumericShardedWithCount[int64]([]int64{5}, 1)
 
 	if ft.ShardCount() != 1 {
 		t.Fatalf("Single shard count: got %d, want 1", ft.ShardCount())
@@ -235,7 +235,7 @@ func TestShardedSingleShard(t *testing.T) {
 func TestShardedAddZeroDelta(t *testing.T) {
 	t.Parallel()
 
-	ft := NewShardedWithCount[int64]([]int64{1, 2, 3, 4, 5}, 2)
+	ft := NewNumericShardedWithCount[int64]([]int64{1, 2, 3, 4, 5}, 2)
 	initial, _ := ft.At(1)
 
 	// Adding zero should not change value
@@ -252,7 +252,7 @@ func TestShardedAddZeroDelta(t *testing.T) {
 func TestShardedPrefixSumCrossShard(t *testing.T) {
 	t.Parallel()
 
-	ft := NewShardedWithCount[int64]([]int64{1, 2, 3, 4, 5}, 2)
+	ft := NewNumericShardedWithCount[int64]([]int64{1, 2, 3, 4, 5}, 2)
 
 	// Test prefix sum crossing shard boundary
 	sum, _ := ft.ExactPrefixSum(3)
@@ -303,12 +303,18 @@ func equalInt64s(a, b []int64) bool {
 	return true
 }
 
-func TestNewShardedWithCountPanics(t *testing.T) {
+func TestShardedInjectedOperationsWithDomainModel(t *testing.T) {
 	t.Parallel()
-	defer func() {
-		if recover() == nil {
-			t.Fatal("expected panic for non-positive shard count")
-		}
-	}()
-	_ = NewShardedWithCount([]int64{1}, 0)
+
+	values := []metricsModel{{Count: 1, Sum: 1}, {Count: 2, Sum: 2}, {Count: 3, Sum: 3}, {Count: 4, Sum: 4}}
+	ft := NewShardedWithOperationsAndCount(values, 2, metricsOperations{})
+
+	got, err := ft.ExactRangeSum(1, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := metricsModel{Count: 9, Sum: 9}
+	if got != want {
+		t.Fatalf("ExactRangeSum(1,3)=%+v, want %+v", got, want)
+	}
 }

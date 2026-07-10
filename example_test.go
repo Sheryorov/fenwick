@@ -7,7 +7,7 @@ import (
 )
 
 func ExampleTree() {
-	ft := fenwick.New[int64]([]int64{3, 2, 5, 1, 4})
+	ft := fenwick.NewNumeric[int64]([]int64{3, 2, 5, 1, 4})
 
 	sum, _ := ft.RangeSum(1, 3)
 	fmt.Println(sum)

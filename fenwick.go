@@ -1,5 +1,5 @@
 // Package fenwick implements concurrency-safe Fenwick trees (binary indexed
-// trees) for point updates and prefix/range sum queries.
+// trees) for point updates and prefix/range aggregation queries.
 package fenwick
 
 import (
@@ -13,37 +13,51 @@ var (
 	ErrInvalidRange    = errors.New("fenwick: invalid range")
 )
 
-// Number is the set of supported value types.
-//
-// Unsigned integers are intentionally excluded: Set may need to apply a
-// negative delta when a value decreases, which cannot be represented safely by
-// an unsigned type.
-type Number interface {
-	~int | ~int8 | ~int16 | ~int32 | ~int64 |
-		~float32 | ~float64
-}
-
-// Tree stores numeric values. Public indexes are zero-based; the internal
-// Fenwick representation is one-based. All exported methods are safe for
-// concurrent use.
-type Tree[T Number] struct {
+// Tree stores values aggregated by injected Operations.
+// Public indexes are zero-based; internal Fenwick indexes are one-based.
+type Tree[T any] struct {
 	mu   sync.RWMutex
+	ops  Operations[T]
 	tree []T
 	vals []T
 }
 
-// New constructs a Tree in O(n). The input slice is copied.
-func New[T Number](values []T) *Tree[T] {
+// New constructs a tree for models implementing Value.
+func New[T Value](values []T) *Tree[T] {
+	var zero T
+	if len(values) > 0 {
+		zero = values[0].Zero().(T)
+	}
+	return NewWithOperations(values, valueOperations[T]{zero: zero})
+}
+
+// NewNumeric constructs a tree for signed integers or floating-point values.
+func NewNumeric[T Number](values []T) *Tree[T] {
+	return NewWithOperations(values, NumericOperations[T]{})
+}
+
+// NewWithOperations constructs a tree using caller-provided aggregation
+// behavior. The input slice is copied and construction takes O(n).
+func NewWithOperations[T any](values []T, ops Operations[T]) *Tree[T] {
+	if ops == nil {
+		panic("fenwick: operations must not be nil")
+	}
+
 	t := &Tree[T]{
+		ops:  ops,
 		tree: make([]T, len(values)+1),
 		vals: append([]T(nil), values...),
 	}
+	zero := ops.Zero()
+	for i := range t.tree {
+		t.tree[i] = zero
+	}
 	for i, value := range values {
 		internal := i + 1
-		t.tree[internal] += value
+		t.tree[internal] = ops.Add(t.tree[internal], value)
 		parent := internal + lowbit(internal)
 		if parent < len(t.tree) {
-			t.tree[parent] += t.tree[internal]
+			t.tree[parent] = ops.Add(t.tree[parent], t.tree[internal])
 		}
 	}
 	return t
@@ -80,10 +94,7 @@ func (t *Tree[T]) Add(index int, delta T) error {
 	if err := validateIndex(index, len(t.vals)); err != nil {
 		return err
 	}
-	if delta == 0 {
-		return nil
-	}
-	t.vals[index] += delta
+	t.vals[index] = t.ops.Add(t.vals[index], delta)
 	t.addLocked(index+1, delta)
 	return nil
 }
@@ -97,10 +108,7 @@ func (t *Tree[T]) Set(index int, value T) error {
 	if err := validateIndex(index, len(t.vals)); err != nil {
 		return err
 	}
-	delta := value - t.vals[index]
-	if delta == 0 {
-		return nil
-	}
+	delta := t.ops.Sub(value, t.vals[index])
 	t.vals[index] = value
 	t.addLocked(index+1, delta)
 	return nil
@@ -129,7 +137,7 @@ func (t *Tree[T]) RangeSum(left, right int) (T, error) {
 	if err := validateRange(left, right, len(t.vals)); err != nil {
 		return zero, err
 	}
-	return t.prefixSumLocked(right+1) - t.prefixSumLocked(left), nil
+	return t.ops.Sub(t.prefixSumLocked(right+1), t.prefixSumLocked(left)), nil
 }
 
 func (t *Tree[T]) Total() T {
@@ -151,22 +159,21 @@ func (t *Tree[T]) Values() []T {
 	return append([]T(nil), t.vals...)
 }
 
-func (t *Tree[T]) addLocked(i int, delta T) {
-	for ; i < len(t.tree); i += lowbit(i) {
-		t.tree[i] += delta
+func (t *Tree[T]) addLocked(index int, delta T) {
+	for i := index; i < len(t.tree); i += lowbit(i) {
+		t.tree[i] = t.ops.Add(t.tree[i], delta)
 	}
 }
 
-func (t *Tree[T]) prefixSumLocked(i int) T {
-	var sum T
-	for ; i > 0; i -= lowbit(i) {
-		sum += t.tree[i]
+func (t *Tree[T]) prefixSumLocked(index int) T {
+	sum := t.ops.Zero()
+	for i := index; i > 0; i -= lowbit(i) {
+		sum = t.ops.Add(sum, t.tree[i])
 	}
 	return sum
 }
 
 func lowbit(i int) int { return i & -i }
-
 func validateIndex(index, length int) error {
 	if index < 0 || index >= length {
 		return indexError(index, length)

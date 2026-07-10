@@ -1,125 +1,355 @@
-# fenwick
+# Fenwick Tree for Go
 
-[![Build](https://github.com/Sheryorov/fenwick/workflows/Build/badge.svg)](https://github.com/Sheryorov/fenwick/actions)
-[![Tests](https://github.com/Sheryorov/fenwick/workflows/Tests/badge.svg)](https://github.com/Sheryorov/fenwick/actions)
-[![codecov](https://codecov.io/gh/Sheryorov/fenwick/graph/badge.svg)](https://codecov.io/gh/Sheryorov/fenwick)
+[![Build](https://github.com/Sheryorov/fenwick/actions/workflows/build.yml/badge.svg?branch=master)](https://github.com/Sheryorov/fenwick/actions/workflows/build.yml)
+[![Tests](https://github.com/Sheryorov/fenwick/actions/workflows/tests.yml/badge.svg?branch=master)](https://github.com/Sheryorov/fenwick/actions/workflows/tests.yml)
+[![codecov](https://codecov.io/gh/Sheryorov/fenwick/branch/master/graph/badge.svg)](https://codecov.io/gh/Sheryorov/fenwick)
 [![Go Report Card](https://goreportcard.com/badge/github.com/Sheryorov/fenwick)](https://goreportcard.com/report/github.com/Sheryorov/fenwick)
+[![Go Reference](https://pkg.go.dev/badge/github.com/Sheryorov/fenwick.svg)](https://pkg.go.dev/github.com/Sheryorov/fenwick)
+[![Go Version](https://img.shields.io/github/go-mod/go-version/Sheryorov/fenwick)](https://github.com/Sheryorov/fenwick/blob/master/go.mod)
 
-A zero-based, concurrency-safe Fenwick tree for signed integer and floating-point types, supporting point updates and range sums.
+A zero-based, concurrency-safe Fenwick tree (Binary Indexed Tree) for Go.
 
-## Supported Types
+The package supports three integration styles:
 
-The `Tree[T]` and `ShardedTree[T]` types support:
-- signed integers: `int`, `int8`, `int16`, `int32`, `int64`;
-- floating point: `float32`, `float64`;
-- named types whose underlying type is one of the above.
+1. **Built-in signed numeric types** through `NewNumeric`.
+2. **Dependency injection** through `Operations[T]` and `NewWithOperations`.
+3. **Legacy self-describing models** through the `Value` interface and `New`.
 
-Unsigned integers are intentionally excluded because `Set` may need a negative
-delta when a value decreases. Arithmetic overflow is not detected.
+It also provides a sharded implementation for write-heavy concurrent workloads.
 
-## API
-
-### Tree[T]
-
-- `New[T](values)` — O(n)
-- `Len()` — O(1)
-- `Add(index, delta)` — O(log n)
-- `Set(index, value)` — O(log n)
-- `At(index)` — O(1)
-- `PrefixSum(index)` — O(log n), inclusive
-- `RangeSum(left, right)` — O(log n), inclusive
-- `Total()` — O(log n)
-- `Values()` — O(n), returns a copy
-
-The implementation copies its input, validates public indexes and ranges, and is safe for concurrent readers and writers using `sync.RWMutex`.
-
-Arithmetic uses the generic type `T` and does not detect overflow.
-
-## Verify
+## Installation
 
 ```bash
-go test ./...
-go test -race ./...
-go test -run=^$ -fuzz=FuzzTreeAgainstNaive -fuzztime=10s
-go test -bench=. -benchmem ./...
-go vet ./...
+go get github.com/Sheryorov/fenwick
 ```
 
-## Usage
+## Core capabilities
 
-### Tree[T]
+- `O(n)` construction
+- `O(log n)` point updates
+- `O(log n)` prefix and range queries
+- zero-based public indexes
+- inclusive ranges
+- concurrent-safe standard tree
+- sharded tree for parallel updates
+- fast and exact sharded query modes
+- injectable aggregation behavior for domain models
+
+## 1. Numeric values
+
+Use `NewNumeric` for signed integer and floating-point types.
 
 ```go
-// Works with any Numeric type
-ft := fenwick.New([]int64{3, 2, 5, 1, 4})
+package main
 
-sum, err := ft.RangeSum(1, 3) // 8
-if err != nil {
-    // handle invalid range
+import (
+    "fmt"
+
+    "github.com/Sheryorov/fenwick"
+)
+
+func main() {
+    tree := fenwick.NewNumeric([]int64{3, 2, 5, 1, 4})
+
+    sum, err := tree.RangeSum(1, 3)
+    if err != nil {
+        panic(err)
+    }
+
+    fmt.Println(sum) // 8
+
+    if err := tree.Set(2, 10); err != nil {
+        panic(err)
+    }
+
+    fmt.Println(tree.Total()) // 20
+}
+```
+
+Supported numeric families:
+
+- `int`, `int8`, `int16`, `int32`, `int64`
+- `float32`, `float64`
+- named types with one of those underlying types
+
+Unsigned integers are intentionally excluded because `Set` may require a negative delta.
+
+## 2. Injecting domain-model operations
+
+Domain models do not need to import or implement anything from this package.
+Aggregation behavior is injected separately through `Operations[T]`.
+
+```go
+type Operations[T any] interface {
+    Zero() T
+    Add(a, b T) T
+    Sub(a, b T) T
+}
+```
+
+Example domain model:
+
+```go
+package main
+
+import (
+    "fmt"
+
+    "github.com/Sheryorov/fenwick"
+)
+
+type Metrics struct {
+    Requests int64
+    Duration float64
 }
 
-err = ft.Set(2, 10)
+type MetricsOperations struct{}
 
-// With floats
-ff := fenwick.New([]float64{1.5, 2.3, 3.7})
-total := ff.Total() // 7.5
+func (MetricsOperations) Zero() Metrics {
+    return Metrics{}
+}
+
+func (MetricsOperations) Add(a, b Metrics) Metrics {
+    return Metrics{
+        Requests: a.Requests + b.Requests,
+        Duration: a.Duration + b.Duration,
+    }
+}
+
+func (MetricsOperations) Sub(a, b Metrics) Metrics {
+    return Metrics{
+        Requests: a.Requests - b.Requests,
+        Duration: a.Duration - b.Duration,
+    }
+}
+
+func main() {
+    tree := fenwick.NewWithOperations(
+        []Metrics{
+            {Requests: 10, Duration: 1.2},
+            {Requests: 20, Duration: 2.8},
+            {Requests: 15, Duration: 1.5},
+        },
+        MetricsOperations{},
+    )
+
+    result, err := tree.RangeSum(0, 1)
+    if err != nil {
+        panic(err)
+    }
+
+    fmt.Printf("requests=%d duration=%.1f\n", result.Requests, result.Duration)
+    // requests=30 duration=4.0
+}
 ```
 
-## Sharded tree for write-heavy concurrency
+This is the recommended integration style when domain models should remain independent from the Fenwick package.
 
-`ShardedTree[T]` splits values into independent contiguous Fenwick trees. Point
-updates to different shards can execute concurrently.
+### Function-based injection
+
+For small integrations, use `OperationFuncs[T]` instead of defining a named operations type.
 
 ```go
-ft := fenwick.NewShardedWithCount([]int64{...}, 32)
+ops := fenwick.OperationFuncs[int64]{
+    ZeroFunc: func() int64 { return 0 },
+    AddFunc:  func(a, b int64) int64 { return a + b },
+    SubFunc:  func(a, b int64) int64 { return a - b },
+}
 
-_ = ft.Add(100, 5)
-_ = ft.Set(200, 9)
-
-// Maximum throughput. Race-free, but not a single cross-shard snapshot while
-// concurrent writers are active.
-sum, _ := ft.RangeSum(50, 250)
-
-// Linearizable consistent snapshot across all intersecting shards.
-exact, _ := ft.ExactRangeSum(50, 250)
-
-_, _ = sum, exact
+tree := fenwick.NewWithOperations([]int64{1, 2, 3}, ops)
 ```
 
-### Constructors
+## 3. Legacy `Value` models
 
-- `NewSharded[T](values)` chooses approximately `4 * GOMAXPROCS` shards.
-- `NewShardedWithCount[T](values, shardCount)` uses an explicit shard count.
+A model may implement `Value` directly:
 
-### Fast methods
+```go
+type Value interface {
+    Add(other Value) Value
+    Sub(other Value) Value
+    Zero() Value
+}
+```
 
-- `PrefixSum`, `RangeSum`, `Total`
-- lock only boundary shards;
-- optimized for throughput;
-- during concurrent writes, the result may combine states observed at slightly
-  different instants.
+Then it can be constructed with `New`:
 
-### Strict snapshot methods
+```go
+tree := fenwick.New([]fenwick.Int64{1, 2, 3})
+```
 
-- `ExactPrefixSum`, `ExactRangeSum`, `ExactTotal`, `Values`
-- lock all involved shards in ascending order;
-- provide one consistent cross-shard view;
-- have higher contention for large ranges.
+Built-in wrappers are provided:
 
-Run correctness and race tests:
+- `fenwick.Int`
+- `fenwick.Int64`
+- `fenwick.Float32`
+- `fenwick.Float64`
+- `fenwick.Uint`
+- `fenwick.Uint64`
+
+For new domain code, injected `Operations[T]` is usually safer because it avoids runtime type assertions inside the model.
+
+## Standard tree API
+
+```go
+type Tree[T any]
+```
+
+| Method | Description | Complexity |
+|---|---|---:|
+| `NewNumeric(values)` | Build a numeric tree | `O(n)` |
+| `NewWithOperations(values, ops)` | Build with injected behavior | `O(n)` |
+| `New(values)` | Build from `Value` models | `O(n)` |
+| `Len()` | Number of values | `O(1)` |
+| `At(index)` | Read one value | `O(1)` |
+| `Add(index, delta)` | Add a delta | `O(log n)` |
+| `Set(index, value)` | Replace a value | `O(log n)` |
+| `PrefixSum(index)` | Inclusive sum `[0, index]` | `O(log n)` |
+| `RangeSum(left, right)` | Inclusive sum `[left, right]` | `O(log n)` |
+| `Total()` | Sum all values | `O(log n)` |
+| `Values()` | Return a copy | `O(n)` |
+
+All exported methods are safe for concurrent use.
+
+## Indexing and ranges
+
+The public API is zero-based.
+
+```go
+values := []int64{3, 2, 5, 1, 4}
+```
+
+Valid indexes are `0` through `4`.
+
+Ranges are inclusive:
+
+```go
+tree.RangeSum(1, 3)
+```
+
+returns `2 + 5 + 1`.
+
+## Sharded tree
+
+The sharded implementation divides values into independently locked contiguous trees.
+
+### Numeric constructors
+
+```go
+tree := fenwick.NewNumericSharded(values)
+tree := fenwick.NewNumericShardedWithCount(values, 32)
+```
+
+### Injected-operations constructors
+
+```go
+tree := fenwick.NewShardedWithOperations(values, ops)
+tree := fenwick.NewShardedWithOperationsAndCount(values, 32, ops)
+```
+
+### Legacy `Value` constructors
+
+```go
+tree := fenwick.NewSharded(values)
+tree := fenwick.NewShardedWithCount(values, 32)
+```
+
+### Fast queries
+
+- `PrefixSum`
+- `RangeSum`
+- `Total`
+
+Fast queries minimize lock duration. During concurrent writes across multiple shards, they are race-free but may combine values observed at slightly different moments.
+
+### Exact queries
+
+- `ExactPrefixSum`
+- `ExactRangeSum`
+- `ExactTotal`
+- `Values`
+
+Exact queries lock all involved shards in deterministic order and return one consistent cross-shard snapshot.
+
+## Choosing an integration style
+
+Use `NewNumeric` when:
+
+- values are signed numbers or floats;
+- direct arithmetic is sufficient;
+- maximum simplicity and performance are desired.
+
+Use `NewWithOperations` when:
+
+- values are domain structs;
+- aggregation behavior should be injected;
+- models should not depend on this package;
+- compile-time type safety is important.
+
+Use `New` with `Value` when:
+
+- existing models already implement the legacy interface;
+- backward compatibility is required.
+
+## Algebra requirements
+
+Injected operations must obey:
+
+- associativity: `Add(Add(a, b), c) == Add(a, Add(b, c))`
+- identity: `Add(a, Zero()) == a`
+- inverse behavior: `Sub(a, a) == Zero()`
+
+Breaking these rules produces incorrect prefix and range results.
+
+## Errors
+
+```go
+fenwick.ErrIndexOutOfRange
+fenwick.ErrInvalidRange
+```
+
+Use `errors.Is`:
+
+```go
+value, err := tree.At(-1)
+if errors.Is(err, fenwick.ErrIndexOutOfRange) {
+    // handle invalid index
+}
+```
+
+## Concurrency
+
+`Tree[T]` uses one `sync.RWMutex`.
+
+`ShardedTree[T]` uses one `sync.RWMutex` per shard, allowing updates to different shards to proceed concurrently.
+
+Sharding is not automatically faster. Benchmark with the expected read/write ratio and index distribution.
+
+## Limitations
+
+- arithmetic overflow is not detected;
+- floating-point accumulation follows IEEE-754 semantics;
+- injected operations are trusted to satisfy the documented algebraic laws;
+- `OperationFuncs` panics if a required function field is nil and used;
+- legacy `Value` implementations may panic on incompatible runtime type assertions;
+- fast sharded reads are not a single global snapshot during concurrent writes.
+
+## Development
 
 ```bash
 go test ./...
 go test -race ./...
+go vet ./...
+go test ./... -coverprofile=coverage.out
+go tool cover -func=coverage.out
+go test -run='^$' -bench=. -benchmem ./...
 ```
 
-Compare concurrent update throughput:
+## Repository
 
-```bash
-go test -run '^$' -bench 'ConcurrentAdd' -benchmem
-```
+- Source: https://github.com/Sheryorov/fenwick
+- Issues: https://github.com/Sheryorov/fenwick/issues
+- Documentation: https://pkg.go.dev/github.com/Sheryorov/fenwick
 
-Always benchmark with the expected read/write ratio and index distribution.
-Sharding helps most when many goroutines update different shards. A single
-`Tree` can remain faster for low contention or read-heavy workloads because it
-has fewer indirections and locks.
+## Reference
+
+Peter M. Fenwick, *A New Data Structure for Cumulative Frequency Tables*, 1994.

@@ -5,13 +5,15 @@ import (
 	"sync"
 )
 
-type ShardedTree[T Number] struct {
+// ShardedTree splits values into independently locked contiguous Fenwick trees.
+type ShardedTree[T any] struct {
+	ops       Operations[T]
 	length    int
 	shardSize int
 	shards    []fenwickShard[T]
 }
 
-type fenwickShard[T Number] struct {
+type fenwickShard[T any] struct {
 	mu    sync.RWMutex
 	tree  []T
 	vals  []T
@@ -19,42 +21,84 @@ type fenwickShard[T Number] struct {
 	_     [56]byte
 }
 
-func NewSharded[T Number](values []T) *ShardedTree[T] {
-	count := runtime.GOMAXPROCS(0) * 4
-	if count < 1 {
-		count = 1
-	}
-	return NewShardedWithCount(values, count)
+// NewSharded constructs a sharded tree for Value models.
+func NewSharded[T Value](values []T) *ShardedTree[T] {
+	return NewShardedWithOperations(values, legacyValueOperations(values))
 }
 
-func NewShardedWithCount[T Number](values []T, shardCount int) *ShardedTree[T] {
+// NewShardedWithCount constructs a sharded tree for Value models with an
+// explicit shard count.
+func NewShardedWithCount[T Value](values []T, shardCount int) *ShardedTree[T] {
+	return NewShardedWithOperationsAndCount(values, shardCount, legacyValueOperations(values))
+}
+
+func legacyValueOperations[T Value](values []T) valueOperations[T] {
+	var zero T
+	if len(values) > 0 {
+		zero = values[0].Zero().(T)
+	}
+	return valueOperations[T]{zero: zero}
+}
+
+// NewNumericSharded constructs a sharded tree for signed numeric values.
+func NewNumericSharded[T Number](values []T) *ShardedTree[T] {
+	return NewShardedWithOperations(values, NumericOperations[T]{})
+}
+
+// NewNumericShardedWithCount constructs a numeric sharded tree with an
+// explicit shard count.
+func NewNumericShardedWithCount[T Number](values []T, shardCount int) *ShardedTree[T] {
+	return NewShardedWithOperationsAndCount(values, shardCount, NumericOperations[T]{})
+}
+
+// NewShardedWithOperations chooses the shard count from GOMAXPROCS.
+func NewShardedWithOperations[T any](values []T, ops Operations[T]) *ShardedTree[T] {
+	shards := runtime.GOMAXPROCS(0) * 4
+	if shards < 1 {
+		shards = 1
+	}
+	return NewShardedWithOperationsAndCount(values, shards, ops)
+}
+
+// NewShardedWithOperationsAndCount injects aggregation behavior and uses an
+// explicit shard count.
+func NewShardedWithOperationsAndCount[T any](values []T, shardCount int, ops Operations[T]) *ShardedTree[T] {
+	if ops == nil {
+		panic("fenwick: operations must not be nil")
+	}
 	if shardCount <= 0 {
 		panic("fenwick: shard count must be positive")
 	}
 	if len(values) == 0 {
-		return &ShardedTree[T]{shardSize: 1}
+		return &ShardedTree[T]{ops: ops, shardSize: 1}
 	}
 	if shardCount > len(values) {
 		shardCount = len(values)
 	}
+
 	shardSize := (len(values) + shardCount - 1) / shardCount
-	t := &ShardedTree[T]{length: len(values), shardSize: shardSize, shards: make([]fenwickShard[T], shardCount)}
-	for si := range t.shards {
-		start := si * shardSize
+	t := &ShardedTree[T]{ops: ops, length: len(values), shardSize: shardSize, shards: make([]fenwickShard[T], shardCount)}
+	zero := ops.Zero()
+	for shardIndex := range t.shards {
+		start := shardIndex * shardSize
 		if start >= len(values) {
 			break
 		}
 		end := min(start+shardSize, len(values))
-		s := &t.shards[si]
+		s := &t.shards[shardIndex]
 		s.vals = append([]T(nil), values[start:end]...)
 		s.tree = make([]T, len(s.vals)+1)
+		for i := range s.tree {
+			s.tree[i] = zero
+		}
+		s.total = zero
 		for i, value := range s.vals {
-			s.total += value
+			s.total = ops.Add(s.total, value)
 			internal := i + 1
-			s.tree[internal] += value
+			s.tree[internal] = ops.Add(s.tree[internal], value)
 			parent := internal + lowbit(internal)
 			if parent < len(s.tree) {
-				s.tree[parent] += s.tree[internal]
+				s.tree[parent] = ops.Add(s.tree[parent], s.tree[internal])
 			}
 		}
 	}
@@ -82,24 +126,20 @@ func (t *ShardedTree[T]) At(index int) (T, error) {
 	}
 	s := &t.shards[si]
 	s.mu.RLock()
-	v := s.vals[li]
-	s.mu.RUnlock()
-	return v, nil
+	defer s.mu.RUnlock()
+	return s.vals[li], nil
 }
 func (t *ShardedTree[T]) Add(index int, delta T) error {
 	si, li, err := t.locate(index)
 	if err != nil {
 		return err
 	}
-	if delta == 0 {
-		return nil
-	}
 	s := &t.shards[si]
 	s.mu.Lock()
-	s.vals[li] += delta
-	s.addLocked(li+1, delta)
-	s.total += delta
-	s.mu.Unlock()
+	defer s.mu.Unlock()
+	s.vals[li] = t.ops.Add(s.vals[li], delta)
+	s.addLocked(t.ops, li+1, delta)
+	s.total = t.ops.Add(s.total, delta)
 	return nil
 }
 func (t *ShardedTree[T]) Set(index int, value T) error {
@@ -109,13 +149,11 @@ func (t *ShardedTree[T]) Set(index int, value T) error {
 	}
 	s := &t.shards[si]
 	s.mu.Lock()
-	delta := value - s.vals[li]
-	if delta != 0 {
-		s.vals[li] = value
-		s.addLocked(li+1, delta)
-		s.total += delta
-	}
-	s.mu.Unlock()
+	defer s.mu.Unlock()
+	delta := t.ops.Sub(value, s.vals[li])
+	s.vals[li] = value
+	s.addLocked(t.ops, li+1, delta)
+	s.total = t.ops.Add(s.total, delta)
 	return nil
 }
 func (t *ShardedTree[T]) PrefixSum(index int) (T, error) {
@@ -124,16 +162,16 @@ func (t *ShardedTree[T]) PrefixSum(index int) (T, error) {
 	if err != nil {
 		return zero, err
 	}
-	var sum T
+	sum := t.ops.Zero()
 	for i := 0; i < si; i++ {
 		s := &t.shards[i]
 		s.mu.RLock()
-		sum += s.total
+		sum = t.ops.Add(sum, s.total)
 		s.mu.RUnlock()
 	}
 	s := &t.shards[si]
 	s.mu.RLock()
-	sum += s.prefixSumLocked(li + 1)
+	sum = t.ops.Add(sum, s.prefixSumLocked(t.ops, li+1))
 	s.mu.RUnlock()
 	return sum, nil
 }
@@ -145,19 +183,19 @@ func (t *ShardedTree[T]) RangeSum(left, right int) (T, error) {
 	return t.rangeSumFast(left, right), nil
 }
 func (t *ShardedTree[T]) Total() T {
-	var sum T
+	var zero T
 	if t == nil {
-		return sum
+		return zero
 	}
+	sum := t.ops.Zero()
 	for i := range t.shards {
 		s := &t.shards[i]
 		s.mu.RLock()
-		sum += s.total
+		sum = t.ops.Add(sum, s.total)
 		s.mu.RUnlock()
 	}
 	return sum
 }
-
 func (t *ShardedTree[T]) ExactPrefixSum(index int) (T, error) {
 	var zero T
 	si, li, err := t.locate(index)
@@ -166,12 +204,11 @@ func (t *ShardedTree[T]) ExactPrefixSum(index int) (T, error) {
 	}
 	t.lockReadRange(0, si)
 	defer t.unlockReadRange(0, si)
-	var sum T
+	sum := t.ops.Zero()
 	for i := 0; i < si; i++ {
-		sum += t.shards[i].total
+		sum = t.ops.Add(sum, t.shards[i].total)
 	}
-	sum += t.shards[si].prefixSumLocked(li + 1)
-	return sum, nil
+	return t.ops.Add(sum, t.shards[si].prefixSumLocked(t.ops, li+1)), nil
 }
 func (t *ShardedTree[T]) ExactRangeSum(left, right int) (T, error) {
 	var zero T
@@ -184,25 +221,25 @@ func (t *ShardedTree[T]) ExactRangeSum(left, right int) (T, error) {
 	defer t.unlockReadRange(fs, ls)
 	if fs == ls {
 		s := &t.shards[fs]
-		return s.prefixSumLocked(rl+1) - s.prefixSumLocked(ll), nil
+		return t.ops.Sub(s.prefixSumLocked(t.ops, rl+1), s.prefixSumLocked(t.ops, ll)), nil
 	}
 	first := &t.shards[fs]
-	sum := first.prefixSumLocked(len(first.vals)) - first.prefixSumLocked(ll)
+	sum := t.ops.Sub(first.total, first.prefixSumLocked(t.ops, ll))
 	for i := fs + 1; i < ls; i++ {
-		sum += t.shards[i].total
+		sum = t.ops.Add(sum, t.shards[i].total)
 	}
-	sum += t.shards[ls].prefixSumLocked(rl + 1)
-	return sum, nil
+	return t.ops.Add(sum, t.shards[ls].prefixSumLocked(t.ops, rl+1)), nil
 }
 func (t *ShardedTree[T]) ExactTotal() T {
-	var sum T
+	var zero T
 	if t == nil || len(t.shards) == 0 {
-		return sum
+		return zero
 	}
 	t.lockReadRange(0, len(t.shards)-1)
 	defer t.unlockReadRange(0, len(t.shards)-1)
+	sum := t.ops.Zero()
 	for i := range t.shards {
-		sum += t.shards[i].total
+		sum = t.ops.Add(sum, t.shards[i].total)
 	}
 	return sum
 }
@@ -212,36 +249,34 @@ func (t *ShardedTree[T]) Values() []T {
 	}
 	t.lockReadRange(0, len(t.shards)-1)
 	defer t.unlockReadRange(0, len(t.shards)-1)
-	out := make([]T, 0, t.length)
+	values := make([]T, 0, t.length)
 	for i := range t.shards {
-		out = append(out, t.shards[i].vals...)
+		values = append(values, t.shards[i].vals...)
 	}
-	return out
+	return values
 }
-
 func (t *ShardedTree[T]) rangeSumFast(left, right int) T {
 	fs, ll, _ := t.locate(left)
 	ls, rl, _ := t.locate(right)
 	if fs == ls {
 		s := &t.shards[fs]
 		s.mu.RLock()
-		sum := s.prefixSumLocked(rl+1) - s.prefixSumLocked(ll)
-		s.mu.RUnlock()
-		return sum
+		defer s.mu.RUnlock()
+		return t.ops.Sub(s.prefixSumLocked(t.ops, rl+1), s.prefixSumLocked(t.ops, ll))
 	}
 	first := &t.shards[fs]
 	first.mu.RLock()
-	sum := first.prefixSumLocked(len(first.vals)) - first.prefixSumLocked(ll)
+	sum := t.ops.Sub(first.total, first.prefixSumLocked(t.ops, ll))
 	first.mu.RUnlock()
 	for i := fs + 1; i < ls; i++ {
 		s := &t.shards[i]
 		s.mu.RLock()
-		sum += s.total
+		sum = t.ops.Add(sum, s.total)
 		s.mu.RUnlock()
 	}
 	last := &t.shards[ls]
 	last.mu.RLock()
-	sum += last.prefixSumLocked(rl + 1)
+	sum = t.ops.Add(sum, last.prefixSumLocked(t.ops, rl+1))
 	last.mu.RUnlock()
 	return sum
 }
@@ -268,15 +303,15 @@ func (t *ShardedTree[T]) unlockReadRange(first, last int) {
 		t.shards[i].mu.RUnlock()
 	}
 }
-func (s *fenwickShard[T]) addLocked(i int, delta T) {
-	for ; i < len(s.tree); i += lowbit(i) {
-		s.tree[i] += delta
+func (s *fenwickShard[T]) addLocked(ops Operations[T], index int, delta T) {
+	for i := index; i < len(s.tree); i += lowbit(i) {
+		s.tree[i] = ops.Add(s.tree[i], delta)
 	}
 }
-func (s *fenwickShard[T]) prefixSumLocked(i int) T {
-	var sum T
-	for ; i > 0; i -= lowbit(i) {
-		sum += s.tree[i]
+func (s *fenwickShard[T]) prefixSumLocked(ops Operations[T], index int) T {
+	sum := ops.Zero()
+	for i := index; i > 0; i -= lowbit(i) {
+		sum = ops.Add(sum, s.tree[i])
 	}
 	return sum
 }

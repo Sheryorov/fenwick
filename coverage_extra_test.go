@@ -24,7 +24,7 @@ func TestTreeAllErrorAndNoOpBranches(t *testing.T) {
 		t.Fatalf("nil RangeSum error=%v", err)
 	}
 
-	ft := New([]int64{10, 20, 30})
+	ft := NewNumeric([]int64{10, 20, 30})
 	for _, index := range []int{-1, 3} {
 		if _, err := ft.At(index); !errors.Is(err, ErrIndexOutOfRange) {
 			t.Fatalf("At(%d) error=%v", index, err)
@@ -40,7 +40,11 @@ func TestTreeAllErrorAndNoOpBranches(t *testing.T) {
 		}
 	}
 
-	invalidRanges := [][2]int{{-1, 0}, {1, 0}, {0, 3}}
+	invalidRanges := [][2]int{
+		{-1, 0},
+		{1, 0},
+		{0, 3},
+	}
 	for _, r := range invalidRanges {
 		if _, err := ft.RangeSum(r[0], r[1]); !errors.Is(err, ErrInvalidRange) {
 			t.Fatalf("RangeSum(%d,%d) error=%v", r[0], r[1], err)
@@ -48,6 +52,7 @@ func TestTreeAllErrorAndNoOpBranches(t *testing.T) {
 	}
 
 	before := ft.Values()
+
 	if err := ft.Add(1, 0); err != nil {
 		t.Fatal(err)
 	}
@@ -60,6 +65,7 @@ func TestTreeAllErrorAndNoOpBranches(t *testing.T) {
 
 	copyValues := ft.Values()
 	copyValues[0] = -999
+
 	got, err := ft.At(0)
 	if err != nil || got != 10 {
 		t.Fatalf("Values exposed internal storage: At(0)=(%d,%v)", got, err)
@@ -69,18 +75,19 @@ func TestTreeAllErrorAndNoOpBranches(t *testing.T) {
 func TestTreeEmptyAndAllNumberKinds(t *testing.T) {
 	t.Parallel()
 
-	empty := New[int64](nil)
+	empty := NewNumeric[int64](nil)
 	if empty.Len() != 0 || empty.Total() != 0 || len(empty.Values()) != 0 {
 		t.Fatalf("bad empty tree state")
 	}
 
 	type Small int8
-	ft8 := New([]Small{1, 2, 3})
+
+	ft8 := NewNumeric([]Small{1, 2, 3})
 	if got := ft8.Total(); got != 6 {
 		t.Fatalf("int8 Total=%v", got)
 	}
 
-	ft32 := New([]float32{1.25, 2.5})
+	ft32 := NewNumeric([]float32{1.25, 2.5})
 	if got := ft32.Total(); got != float32(3.75) {
 		t.Fatalf("float32 Total=%v", got)
 	}
@@ -90,25 +97,32 @@ func TestNewShardedAutomaticAndConstructorEdges(t *testing.T) {
 	t.Parallel()
 
 	values := []int64{1, 2, 3}
-	auto := NewSharded(values)
+
+	auto := NewNumericSharded(values)
 	if auto.Len() != len(values) {
 		t.Fatalf("Len=%d", auto.Len())
 	}
+
 	wantMax := runtime.GOMAXPROCS(0) * 4
 	if wantMax > len(values) {
 		wantMax = len(values)
 	}
+
 	if auto.ShardCount() != wantMax {
 		t.Fatalf("ShardCount=%d want %d", auto.ShardCount(), wantMax)
 	}
 
-	capped := NewShardedWithCount(values, 100)
+	capped := NewNumericShardedWithCount(values, 100)
 	if capped.ShardCount() != len(values) {
 		t.Fatalf("capped ShardCount=%d", capped.ShardCount())
 	}
 
-	empty := NewShardedWithCount[int64](nil, 2)
-	if empty.Len() != 0 || empty.ShardCount() != 0 || empty.Total() != 0 || empty.ExactTotal() != 0 || empty.Values() != nil {
+	empty := NewNumericShardedWithCount[int64](nil, 2)
+	if empty.Len() != 0 ||
+		empty.ShardCount() != 0 ||
+		empty.Total() != 0 ||
+		empty.ExactTotal() != 0 ||
+		empty.Values() != nil {
 		t.Fatalf("bad empty sharded state")
 	}
 }
@@ -117,6 +131,7 @@ func TestShardedAllErrorAndNoOpBranches(t *testing.T) {
 	t.Parallel()
 
 	var nilTree *ShardedTree[int64]
+
 	if _, err := nilTree.At(0); !errors.Is(err, ErrIndexOutOfRange) {
 		t.Fatalf("nil At: %v", err)
 	}
@@ -139,7 +154,11 @@ func TestShardedAllErrorAndNoOpBranches(t *testing.T) {
 		t.Fatalf("nil ExactRangeSum: %v", err)
 	}
 
-	ft := NewShardedWithCount([]int64{1, 2, 3, 4, 5, 6}, 3)
+	ft := NewNumericShardedWithCount(
+		[]int64{1, 2, 3, 4, 5, 6},
+		3,
+	)
+
 	for _, index := range []int{-1, 6} {
 		if _, err := ft.At(index); !errors.Is(err, ErrIndexOutOfRange) {
 			t.Fatalf("At(%d): %v", index, err)
@@ -157,7 +176,13 @@ func TestShardedAllErrorAndNoOpBranches(t *testing.T) {
 			t.Fatalf("ExactPrefixSum(%d): %v", index, err)
 		}
 	}
-	for _, r := range [][2]int{{-1, 0}, {2, 1}, {0, 6}} {
+
+	invalidRanges := [][2]int{
+		{-1, 0},
+		{2, 1},
+		{0, 6},
+	}
+	for _, r := range invalidRanges {
 		if _, err := ft.RangeSum(r[0], r[1]); !errors.Is(err, ErrInvalidRange) {
 			t.Fatalf("RangeSum%v: %v", r, err)
 		}
@@ -167,6 +192,7 @@ func TestShardedAllErrorAndNoOpBranches(t *testing.T) {
 	}
 
 	before := ft.Values()
+
 	if err := ft.Add(2, 0); err != nil {
 		t.Fatal(err)
 	}
@@ -179,6 +205,7 @@ func TestShardedAllErrorAndNoOpBranches(t *testing.T) {
 
 	copied := ft.Values()
 	copied[0] = 999
+
 	if got, _ := ft.At(0); got != 1 {
 		t.Fatalf("Values exposed storage: %d", got)
 	}
@@ -187,36 +214,69 @@ func TestShardedAllErrorAndNoOpBranches(t *testing.T) {
 func TestShardedReadPathsSameAndCrossShard(t *testing.T) {
 	t.Parallel()
 
-	ft := NewShardedWithCount([]int64{1, 2, 3, 4, 5, 6}, 3) // shards [1,2], [3,4], [5,6]
+	ft := NewNumericShardedWithCount(
+		[]int64{1, 2, 3, 4, 5, 6},
+		3,
+	)
 
 	checks := []struct {
-		left, right int
-		want        int64
+		left  int
+		right int
+		want  int64
 	}{
-		{0, 0, 1},  // same shard
-		{0, 1, 3},  // same shard full
-		{1, 4, 14}, // crosses all three
-		{2, 5, 18}, // starts on shard boundary
+		{0, 0, 1},
+		{0, 1, 3},
+		{1, 4, 14},
+		{2, 5, 18},
 	}
+
 	for _, tc := range checks {
 		fast, err := ft.RangeSum(tc.left, tc.right)
 		if err != nil || fast != tc.want {
-			t.Fatalf("fast [%d,%d]=(%d,%v), want %d", tc.left, tc.right, fast, err, tc.want)
+			t.Fatalf(
+				"fast [%d,%d]=(%d,%v), want %d",
+				tc.left,
+				tc.right,
+				fast,
+				err,
+				tc.want,
+			)
 		}
+
 		exact, err := ft.ExactRangeSum(tc.left, tc.right)
 		if err != nil || exact != tc.want {
-			t.Fatalf("exact [%d,%d]=(%d,%v), want %d", tc.left, tc.right, exact, err, tc.want)
+			t.Fatalf(
+				"exact [%d,%d]=(%d,%v), want %d",
+				tc.left,
+				tc.right,
+				exact,
+				err,
+				tc.want,
+			)
 		}
 	}
 
 	for index, want := range []int64{1, 3, 6, 10, 15, 21} {
 		fast, err := ft.PrefixSum(index)
 		if err != nil || fast != want {
-			t.Fatalf("PrefixSum(%d)=(%d,%v), want %d", index, fast, err, want)
+			t.Fatalf(
+				"PrefixSum(%d)=(%d,%v), want %d",
+				index,
+				fast,
+				err,
+				want,
+			)
 		}
+
 		exact, err := ft.ExactPrefixSum(index)
 		if err != nil || exact != want {
-			t.Fatalf("ExactPrefixSum(%d)=(%d,%v), want %d", index, exact, err, want)
+			t.Fatalf(
+				"ExactPrefixSum(%d)=(%d,%v), want %d",
+				index,
+				exact,
+				err,
+				want,
+			)
 		}
 	}
 }
@@ -224,19 +284,29 @@ func TestShardedReadPathsSameAndCrossShard(t *testing.T) {
 func TestShardedFloatAndNamedType(t *testing.T) {
 	t.Parallel()
 
-	ft := NewShardedWithCount([]float64{1.5, -0.5, 2}, 2)
+	ft := NewNumericShardedWithCount(
+		[]float64{1.5, -0.5, 2},
+		2,
+	)
+
 	if got := ft.ExactTotal(); got != 3 {
 		t.Fatalf("float total=%v", got)
 	}
+
 	if err := ft.Set(1, 0.5); err != nil {
 		t.Fatal(err)
 	}
+
 	if got, err := ft.ExactRangeSum(0, 2); err != nil || got != 4 {
 		t.Fatalf("float range=(%v,%v)", got, err)
 	}
 
 	type Score int32
-	named := NewShardedWithCount([]Score{1, 2, 3}, 2)
+
+	named := NewNumericShardedWithCount(
+		[]Score{1, 2, 3},
+		2,
+	)
 	if got := named.Total(); got != 6 {
 		t.Fatalf("named total=%v", got)
 	}

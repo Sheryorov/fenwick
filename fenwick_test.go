@@ -10,7 +10,7 @@ import (
 func TestTree(t *testing.T) {
 	t.Parallel()
 
-	ft := New[int64]([]int64{3, 2, 5, 1, 4})
+	ft := NewNumeric[int64]([]int64{3, 2, 5, 1, 4})
 
 	if got := ft.Len(); got != 5 {
 		t.Fatalf("Len()=%d, want 5", got)
@@ -47,7 +47,7 @@ func TestTree(t *testing.T) {
 func TestEmptyAndErrors(t *testing.T) {
 	t.Parallel()
 
-	ft := New[int64](nil)
+	ft := NewNumeric[int64](nil)
 	if ft.Len() != 0 || ft.Total() != 0 {
 		t.Fatalf("empty tree has Len=%d Total=%d", ft.Len(), ft.Total())
 	}
@@ -66,7 +66,7 @@ func TestEmptyAndErrors(t *testing.T) {
 func TestValuesReturnsCopy(t *testing.T) {
 	t.Parallel()
 
-	ft := New[int64]([]int64{1, 2, 3})
+	ft := NewNumeric[int64]([]int64{1, 2, 3})
 	values := ft.Values()
 	values[0] = 999
 
@@ -86,7 +86,7 @@ func TestRandomAgainstNaive(t *testing.T) {
 		values[i] = int64(rng.Intn(2001) - 1000)
 	}
 
-	ft := New[int64](values)
+	ft := NewNumeric[int64](values)
 	naive := append([]int64(nil), values...)
 
 	for step := 0; step < 10_000; step++ {
@@ -124,7 +124,7 @@ func TestRandomAgainstNaive(t *testing.T) {
 }
 
 func TestConcurrentAccess(t *testing.T) {
-	ft := New[int64](make([]int64, 128))
+	ft := NewNumeric[int64](make([]int64, 128))
 
 	var wg sync.WaitGroup
 	for g := 0; g < 8; g++ {
@@ -164,7 +164,7 @@ func FuzzTreeAgainstNaive(f *testing.F) {
 		for i, value := range data {
 			values[i] = int64(int8(value))
 		}
-		ft := New[int64](values)
+		ft := NewNumeric[int64](values)
 		naive := append([]int64(nil), values...)
 
 		if len(naive) == 0 {
@@ -204,7 +204,7 @@ func BenchmarkTreeRangeSum(b *testing.B) {
 	for i := range values {
 		values[i] = int64(i)
 	}
-	ft := New[int64](values)
+	ft := NewNumeric[int64](values)
 
 	b.ReportAllocs()
 	b.ResetTimer()
@@ -217,7 +217,7 @@ func BenchmarkTreeRangeSum(b *testing.B) {
 }
 
 func BenchmarkTreeAdd(b *testing.B) {
-	ft := New[int64](make([]int64, 1<<20))
+	ft := NewNumeric[int64](make([]int64, 1<<20))
 
 	b.ReportAllocs()
 	b.ResetTimer()
@@ -231,7 +231,7 @@ func BenchmarkTreeAdd(b *testing.B) {
 func TestAddZeroDelta(t *testing.T) {
 	t.Parallel()
 
-	ft := New[int64]([]int64{1, 2, 3})
+	ft := NewNumeric[int64]([]int64{1, 2, 3})
 	initial, _ := ft.At(1)
 
 	// Adding zero should not change value
@@ -251,7 +251,7 @@ func TestAddZeroDelta(t *testing.T) {
 func TestSetZeroDelta(t *testing.T) {
 	t.Parallel()
 
-	ft := New[int64]([]int64{1, 2, 3})
+	ft := NewNumeric[int64]([]int64{1, 2, 3})
 
 	// Setting to same value should work
 	if err := ft.Set(1, 2); err != nil {
@@ -286,23 +286,64 @@ func TestNilTreeOperations(t *testing.T) {
 	}
 }
 
-func TestFloat64AndNamedType(t *testing.T) {
+type metricsModel struct {
+	Count int64
+	Sum   float64
+}
+
+type metricsOperations struct{}
+
+func (metricsOperations) Zero() metricsModel { return metricsModel{} }
+func (metricsOperations) Add(a, b metricsModel) metricsModel {
+	return metricsModel{Count: a.Count + b.Count, Sum: a.Sum + b.Sum}
+}
+func (metricsOperations) Sub(a, b metricsModel) metricsModel {
+	return metricsModel{Count: a.Count - b.Count, Sum: a.Sum - b.Sum}
+}
+
+func TestInjectedOperationsWithDomainModel(t *testing.T) {
 	t.Parallel()
 
-	ft := New([]float64{1.5, 2.25, -0.75})
-	if got := ft.Total(); got != 3.0 {
-		t.Fatalf("float Total()=%v, want 3", got)
-	}
-	if err := ft.Set(1, 1.25); err != nil {
+	values := []metricsModel{{Count: 2, Sum: 1.5}, {Count: 3, Sum: 2.5}, {Count: 5, Sum: 4}}
+	ft := NewWithOperations(values, metricsOperations{})
+
+	got, err := ft.RangeSum(1, 2)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if got, err := ft.RangeSum(0, 2); err != nil || got != 2.0 {
-		t.Fatalf("float RangeSum()=(%v,%v), want (2,nil)", got, err)
+	want := metricsModel{Count: 8, Sum: 6.5}
+	if got != want {
+		t.Fatalf("RangeSum(1,2)=%+v, want %+v", got, want)
 	}
 
-	type Score int64
-	named := New([]Score{1, 2, 3})
-	if got := named.Total(); got != 6 {
-		t.Fatalf("named Total()=%v, want 6", got)
+	if err := ft.Set(1, metricsModel{Count: 10, Sum: 8}); err != nil {
+		t.Fatal(err)
 	}
+	if total := ft.Total(); total != (metricsModel{Count: 17, Sum: 13.5}) {
+		t.Fatalf("Total()=%+v", total)
+	}
+}
+
+func TestOperationFuncsInjection(t *testing.T) {
+	t.Parallel()
+
+	ops := OperationFuncs[int64]{
+		ZeroFunc: func() int64 { return 0 },
+		AddFunc:  func(a, b int64) int64 { return a + b },
+		SubFunc:  func(a, b int64) int64 { return a - b },
+	}
+	ft := NewWithOperations([]int64{1, 2, 3}, ops)
+	if got := ft.Total(); got != 6 {
+		t.Fatalf("Total()=%d, want 6", got)
+	}
+}
+
+func TestNilOperationsPanics(t *testing.T) {
+	t.Parallel()
+	defer func() {
+		if recover() == nil {
+			t.Fatal("expected panic")
+		}
+	}()
+	NewWithOperations[int64](nil, nil)
 }
