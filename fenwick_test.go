@@ -227,3 +227,61 @@ func BenchmarkTreeAdd(b *testing.B) {
 		}
 	}
 }
+
+func TestAddZeroDelta(t *testing.T) {
+	t.Parallel()
+
+	ft := New[int64]([]int64{1, 2, 3})
+	initial, _ := ft.At(1)
+
+	// Adding zero should not change value
+	if err := ft.Add(1, 0); err != nil {
+		t.Fatalf("Add(1, 0): %v", err)
+	}
+
+	got, _ := ft.At(1)
+	if got != initial {
+		t.Fatalf("Add(1, 0) changed value: got %d, want %d", got, initial)
+	}
+	if sum := ft.Total(); sum != 6 {
+		t.Fatalf("Total after zero add: got %d, want 6", sum)
+	}
+}
+
+func TestSetZeroDelta(t *testing.T) {
+	t.Parallel()
+
+	ft := New[int64]([]int64{1, 2, 3})
+
+	// Setting to same value should work
+	if err := ft.Set(1, 2); err != nil {
+		t.Fatalf("Set(1, 2): %v", err)
+	}
+
+	got, _ := ft.At(1)
+	if got != 2 {
+		t.Fatalf("Set(1, 2): got %d", got)
+	}
+}
+
+func TestNilTreeOperations(t *testing.T) {
+	t.Parallel()
+
+	var ft *Tree[int64]
+
+	if ft.Len() != 0 {
+		t.Fatalf("Nil tree Len: got %d, want 0", ft.Len())
+	}
+
+	if ft.Total() != 0 {
+		t.Fatalf("Nil tree Total: got %d, want 0", ft.Total())
+	}
+
+	if values := ft.Values(); values != nil {
+		t.Fatalf("Nil tree Values: got %v, want nil", values)
+	}
+
+	if _, err := ft.At(0); !errors.Is(err, ErrIndexOutOfRange) {
+		t.Fatalf("Nil tree At(0): error %v, want ErrIndexOutOfRange", err)
+	}
+}

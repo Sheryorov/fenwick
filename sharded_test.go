@@ -187,6 +187,80 @@ func BenchmarkShardedRangeSumExact(b *testing.B) {
 	}
 }
 
+func TestNilShardedTreeOperations(t *testing.T) {
+	t.Parallel()
+
+	var ft *ShardedTree[int64]
+
+	if ft.Len() != 0 {
+		t.Fatalf("Nil ShardedTree Len: got %d, want 0", ft.Len())
+	}
+
+	if ft.ShardCount() != 0 {
+		t.Fatalf("Nil ShardedTree ShardCount: got %d, want 0", ft.ShardCount())
+	}
+
+	if ft.Total() != 0 {
+		t.Fatalf("Nil ShardedTree Total: got %d, want 0", ft.Total())
+	}
+
+	if ft.ExactTotal() != 0 {
+		t.Fatalf("Nil ShardedTree ExactTotal: got %d, want 0", ft.ExactTotal())
+	}
+
+	if values := ft.Values(); values != nil {
+		t.Fatalf("Nil ShardedTree Values: got %v, want nil", values)
+	}
+}
+
+func TestShardedSingleShard(t *testing.T) {
+	t.Parallel()
+
+	ft := NewShardedWithCount[int64]([]int64{5}, 1)
+
+	if ft.ShardCount() != 1 {
+		t.Fatalf("Single shard count: got %d, want 1", ft.ShardCount())
+	}
+
+	if total := ft.Total(); total != 5 {
+		t.Fatalf("Single shard total: got %d, want 5", total)
+	}
+
+	sum, _ := ft.ExactRangeSum(0, 0)
+	if sum != 5 {
+		t.Fatalf("Single shard range sum: got %d, want 5", sum)
+	}
+}
+
+func TestShardedAddZeroDelta(t *testing.T) {
+	t.Parallel()
+
+	ft := NewShardedWithCount[int64]([]int64{1, 2, 3, 4, 5}, 2)
+	initial, _ := ft.At(1)
+
+	// Adding zero should not change value
+	if err := ft.Add(1, 0); err != nil {
+		t.Fatalf("Add(1, 0): %v", err)
+	}
+
+	got, _ := ft.At(1)
+	if got != initial {
+		t.Fatalf("Add(1, 0) changed value: got %d, want %d", got, initial)
+	}
+}
+
+func TestShardedPrefixSumCrossShard(t *testing.T) {
+	t.Parallel()
+
+	ft := NewShardedWithCount[int64]([]int64{1, 2, 3, 4, 5}, 2)
+
+	// Test prefix sum crossing shard boundary
+	sum, _ := ft.ExactPrefixSum(3)
+	if sum != 10 { // 1+2+3+4
+		t.Fatalf("PrefixSum(3): got %d, want 10", sum)
+	}
+}
+
 type addTarget interface {
 	Add(index int, delta int64) error
 	Len() int
