@@ -311,3 +311,85 @@ func TestShardedFloatAndNamedType(t *testing.T) {
 		t.Fatalf("named total=%v", got)
 	}
 }
+func TestMutationConstructors(t *testing.T) {
+	t.Parallel()
+
+	add := AddMutation(3, int64(10))
+	if add.Index != 3 {
+		t.Fatalf("AddMutation Index=%d want 3", add.Index)
+	}
+	if add.Kind != MutationAdd {
+		t.Fatalf("AddMutation Kind=%v want %v", add.Kind, MutationAdd)
+	}
+	if add.Value != 10 {
+		t.Fatalf("AddMutation Value=%d want 10", add.Value)
+	}
+
+	set := SetMutation(5, int64(20))
+	if set.Index != 5 {
+		t.Fatalf("SetMutation Index=%d want 5", set.Index)
+	}
+	if set.Kind != MutationSet {
+		t.Fatalf("SetMutation Kind=%v want %v", set.Kind, MutationSet)
+	}
+	if set.Value != 20 {
+		t.Fatalf("SetMutation Value=%d want 20", set.Value)
+	}
+}
+
+func TestValidateMutationKind(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		kind    MutationKind
+		wantErr bool
+	}{
+		{
+			name: "add",
+			kind: MutationAdd,
+		},
+		{
+			name: "set",
+			kind: MutationSet,
+		},
+		{
+			name:    "zero",
+			kind:    MutationKind(0),
+			wantErr: true,
+		},
+		{
+			name:    "unknown",
+			kind:    MutationKind(255),
+			wantErr: true,
+		},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			err := validateMutationKind(tc.kind)
+
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf(
+						"validateMutationKind(%d) returned nil error",
+						tc.kind,
+					)
+				}
+				return
+			}
+
+			if err != nil {
+				t.Fatalf(
+					"validateMutationKind(%d) error=%v",
+					tc.kind,
+					err,
+				)
+			}
+		})
+	}
+}

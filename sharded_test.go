@@ -4,6 +4,7 @@ import (
 	"errors"
 	"math/rand"
 	"runtime"
+	"slices"
 	"sync"
 	"testing"
 )
@@ -146,6 +147,50 @@ func TestShardedConcurrentUpdates(t *testing.T) {
 
 	if got := ft.ExactTotal(); got != workers*loops {
 		t.Fatalf("ExactTotal()=%d, want %d", got, workers*loops)
+	}
+}
+
+func TestShardedTreeApplyEmptyBatch(t *testing.T) {
+	t.Parallel()
+
+	ft := NewNumericShardedWithCount(
+		[]int64{1, 2, 3, 4},
+		2,
+	)
+
+	before := ft.Values()
+
+	if err := ft.Apply(); err != nil {
+		t.Fatalf("Apply() error=%v", err)
+	}
+
+	if got := ft.Values(); !slices.Equal(got, before) {
+		t.Fatalf("Apply() changed values: got %v want %v", got, before)
+	}
+}
+
+func TestShardedTreeApplyInvalidMutationDoesNotPartiallyApply(t *testing.T) {
+	t.Parallel()
+
+	ft := NewNumericShardedWithCount(
+		[]int64{1, 2, 3, 4},
+		2,
+	)
+
+	err := ft.Apply(
+		AddMutation(0, int64(10)),
+		Mutation[int64]{
+			Index: 3,
+			Kind:  MutationKind(99),
+			Value: 20,
+		},
+	)
+	if err == nil {
+		t.Fatal("Apply() expected error")
+	}
+
+	if got := ft.Values(); !slices.Equal(got, []int64{1, 2, 3, 4}) {
+		t.Fatalf("Apply() partially mutated tree: %v", got)
 	}
 }
 
